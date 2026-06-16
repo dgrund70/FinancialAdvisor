@@ -31,6 +31,13 @@ BASE_DIR = Path(__file__).parent
 PRIJZEN  = BASE_DIR / "data" / "prijzen.json"
 DB_PATH  = BASE_DIR / "data" / "app.db"
 
+# Laad omgevingsvariabelen uit .env (indien aanwezig) vóór ze gelezen worden.
+try:
+    from dotenv import load_dotenv
+    load_dotenv(BASE_DIR / ".env")
+except ImportError:
+    pass
+
 app = Flask(__name__)
 app.config["SECRET_KEY"] = os.environ.get("SECRET_KEY", "dev-secret-change-me")
 app.config["SQLALCHEMY_DATABASE_URI"] = f"sqlite:///{DB_PATH}"

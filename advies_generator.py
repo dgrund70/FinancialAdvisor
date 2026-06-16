@@ -26,6 +26,13 @@ DATA_DIR   = SCRIPT_DIR / "data"
 DB_PATH    = DATA_DIR / "app.db"
 PRIJZEN    = DATA_DIR / "prijzen.json"
 
+# Laad omgevingsvariabelen uit .env (o.a. ANTHROPIC_API_KEY) indien aanwezig.
+try:
+    from dotenv import load_dotenv
+    load_dotenv(SCRIPT_DIR / ".env")
+except ImportError:
+    pass
+
 MODEL = "claude-sonnet-4-6"
 
 
