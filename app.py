@@ -8,7 +8,7 @@ from pathlib import Path
 
 from flask import Flask, flash, redirect, render_template, request, url_for
 from flask_wtf.csrf import CSRFProtect
-from markupsafe import Markup
+from markupsafe import Markup, escape
 from sqlalchemy import text
 from helpers import naar_eur
 from models import (Advies, Aanbeveling, BrokerAccount, Gebruiker,
@@ -17,10 +17,15 @@ from models import (Advies, Aanbeveling, BrokerAccount, Gebruiker,
 try:
     import markdown as _md
     def _render_md(text):
-        return Markup(_md.markdown(text or "", extensions=["nl2br", "tables"]))
+        # Escape '<' zodat ruwe HTML uit (mogelijk prompt-geïnjecteerde)
+        # adviestekst niet als HTML draait. Markdown genereert zélf nog veilige
+        # tags uit #/*/lijst-syntax; alleen door gebruiker/LLM aangeleverde
+        # angle brackets worden onschadelijk gemaakt.
+        veilig = (text or "").replace("<", "&lt;")
+        return Markup(_md.markdown(veilig, extensions=["nl2br", "tables"]))
 except ImportError:
     def _render_md(text):
-        return Markup(f"<pre>{text or ''}</pre>")
+        return Markup(f"<pre>{escape(text or '')}</pre>")
 
 BASE_DIR = Path(__file__).parent
 PRIJZEN  = BASE_DIR / "data" / "prijzen.json"
