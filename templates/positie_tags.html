@@ -1,0 +1,57 @@
+{% extends "base.html" %}
+{% block content %}
+
+<div class="row justify-content-center">
+  <div class="col-12 col-md-7 col-lg-5">
+
+    <div class="d-flex align-items-center mb-3 gap-2">
+      <a href="{{ url_for('dashboard', gebruiker_id=gebruiker.id) }}" class="btn btn-link p-0 text-muted">
+        <i class="bi bi-arrow-left"></i>
+      </a>
+      <h5 class="mb-0 fw-semibold">Tags — {{ pos.ticker }}</h5>
+    </div>
+
+    <div class="card border-0 shadow-sm">
+      <div class="card-body p-4">
+        <form method="post"
+              action="{{ url_for('positie_tags_bewerken', gebruiker_id=gebruiker.id, pos_id=pos.id) }}">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+          {% if alle_tags %}
+          <div class="d-flex flex-wrap gap-3 mb-4">
+            {% for tag in alle_tags %}
+            <div class="form-check">
+              <input class="form-check-input" type="checkbox" name="tag_ids"
+                     id="tag_{{ tag.id }}" value="{{ tag.id }}"
+                     {{ 'checked' if tag in pos.tags }}>
+              <label class="form-check-label" for="tag_{{ tag.id }}">
+                <span class="badge bg-primary bg-opacity-10 text-primary border border-primary-subtle">
+                  {{ tag.naam }}
+                </span>
+              </label>
+            </div>
+            {% endfor %}
+          </div>
+          {% else %}
+          <p class="text-muted mb-4">
+            Nog geen tags beschikbaar.
+            <a href="{{ url_for('tags_overzicht', gebruiker_id=gebruiker.id) }}">Maak er eerst een aan.</a>
+          </p>
+          {% endif %}
+
+          <div class="d-grid gap-2">
+            <button type="submit" class="btn btn-primary">
+              <i class="bi bi-check-lg me-1"></i>Opslaan
+            </button>
+            <a href="{{ url_for('dashboard', gebruiker_id=gebruiker.id) }}"
+               class="btn btn-outline-secondary">Annuleren</a>
+          </div>
+
+        </form>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+{% endblock %}

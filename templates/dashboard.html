@@ -1,0 +1,227 @@
+{% extends "base.html" %}
+{% block content %}
+
+{# ── Macro's ──────────────────────────────────────────────────── #}
+{% macro kleur(v) %}{{ 'pos' if v is not none and v > 0 else 'neg' if v is not none and v < 0 else 'text-muted' }}{% endmacro %}
+{% macro teken(v) %}{{ '+' if v is not none and v > 0 else '' }}{% endmacro %}
+{% macro eur(v) %}{% if v is not none %}€&nbsp;{{ "%.2f"|format(v) }}{% else %}—{% endif %}{% endmacro %}
+{% macro geld(v, valuta) %}{% if v is none %}—{% elif not valuta or valuta == 'EUR' %}€&nbsp;{{ "%.2f"|format(v) }}{% else %}{{ "%.2f"|format(v) }}&nbsp;{{ valuta }}{% endif %}{% endmacro %}
+{% macro pct(v) %}{{ teken(v) }}{{ "%.2f"|format(v) }}%{% endmacro %}
+
+{# ── Samenvatting bovenaan ─────────────────────────────────────── #}
+<div class="row g-3 mb-4">
+
+  <div class="col-12 col-sm-4">
+    <div class="card h-100 border-0 shadow-sm">
+      <div class="card-body">
+        <p class="text-muted small mb-1"><i class="bi bi-wallet2 me-1"></i>Totale waarde</p>
+        <h4 class="fw-bold mb-0">{{ eur(totaal.waarde) }}</h4>
+      </div>
+    </div>
+  </div>
+
+  <div class="col-12 col-sm-4">
+    <div class="card h-100 border-0 shadow-sm">
+      <div class="card-body">
+        <p class="text-muted small mb-1"><i class="bi bi-clock-history me-1"></i>Dag rendement</p>
+        <h4 class="fw-bold mb-0 {{ kleur(totaal.dag) }}">
+          {{ teken(totaal.dag) }}{{ eur(totaal.dag) }}
+        </h4>
+      </div>
+    </div>
+  </div>
+
+  <div class="col-12 col-sm-4">
+    <div class="card h-100 border-0 shadow-sm">
+      <div class="card-body">
+        <p class="text-muted small mb-1"><i class="bi bi-bar-chart-line me-1"></i>Totaal rendement</p>
+        <h4 class="fw-bold mb-0 {{ kleur(totaal.winst) }}">
+          {{ teken(totaal.winst) }}{{ eur(totaal.winst) }}
+        </h4>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+{# ── Toolbar ───────────────────────────────────────────────────── #}
+<div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+  <small class="text-muted">
+    {% if bijgewerkt %}
+      <i class="bi bi-arrow-repeat me-1"></i>Koersen: {{ bijgewerkt }}
+    {% else %}
+      <i class="bi bi-exclamation-circle me-1"></i>Nog geen koersen geladen
+    {% endif %}
+  </small>
+  <div class="d-flex gap-2 flex-wrap">
+    <form method="post" action="{{ url_for('prijzen_verversen') }}">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <input type="hidden" name="gebruiker_id" value="{{ gebruiker.id }}">
+      <button class="btn btn-outline-secondary btn-sm">
+        <i class="bi bi-arrow-clockwise me-1"></i>Ververs koersen
+      </button>
+    </form>
+  </div>
+</div>
+
+{# ── Broker accounts ───────────────────────────────────────────── #}
+{% set heeft_posities = account_data | selectattr('rows') | list | length > 0 %}
+
+{% if not heeft_posities %}
+  <div class="card border-0 shadow-sm mb-4">
+    <div class="card-body text-center py-5 text-muted">
+      <i class="bi bi-inbox fs-1 d-block mb-3"></i>
+      <p class="mb-3">Nog geen posities. Voeg een broker account toe om te beginnen.</p>
+    </div>
+  </div>
+{% endif %}
+
+{% for d in account_data %}
+<div class="card border-0 shadow-sm mb-4">
+  <div class="card-header bg-white border-bottom d-flex justify-content-between align-items-center py-3 flex-wrap gap-2">
+    <h6 class="mb-0 fw-semibold">
+      <i class="bi bi-bank me-2 text-primary"></i>{{ d.account.naam }}
+    </h6>
+    <div class="d-flex gap-2 align-items-center">
+      <span class="text-muted small">{{ d.rows | length }} positie{{ 's' if d.rows | length != 1 }}</span>
+      <a href="{{ url_for('positie_toevoegen', gebruiker_id=gebruiker.id, account_id=d.account.id) }}"
+         class="btn btn-outline-primary btn-sm">
+        <i class="bi bi-plus-lg me-1"></i>Positie
+      </a>
+      <form method="post"
+            action="{{ url_for('account_verwijderen', gebruiker_id=gebruiker.id, account_id=d.account.id) }}"
+            onsubmit="return confirm('Account \'{{ d.account.naam }}\' en alle posities verwijderen?')">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <button class="btn btn-outline-danger btn-sm" title="Account verwijderen">
+          <i class="bi bi-trash3"></i>
+        </button>
+      </form>
+    </div>
+  </div>
+
+  {% if d.rows %}
+  <div class="table-responsive">
+    <table class="table table-hover align-middle mb-0">
+      <thead class="table-light">
+        <tr>
+          <th>Ticker</th>
+          <th class="d-none d-md-table-cell">Naam</th>
+          <th class="d-none d-lg-table-cell">Tags</th>
+          <th class="text-end">Aantal</th>
+          <th class="text-end d-none d-sm-table-cell">Aankoop</th>
+          <th class="text-end">Koers</th>
+          <th class="text-end">Waarde</th>
+          <th class="text-end d-none d-sm-table-cell">Dag</th>
+          <th class="text-end">Rendement</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for r in d.rows %}
+        <tr>
+          <td class="fw-semibold">
+            {{ r.pos.ticker }}
+            {% if r.pos.koers_type == 'handmatig' %}
+              <span class="badge bg-light text-muted border ms-1" title="Handmatige koers">M</span>
+            {% endif %}
+          </td>
+          <td class="text-muted small d-none d-md-table-cell">{{ r.pos.naam or '—' }}</td>
+          <td class="d-none d-lg-table-cell">
+            {% for tag in r.pos.tags %}
+              <span class="badge bg-primary bg-opacity-10 text-primary border border-primary-subtle me-1">{{ tag.naam }}</span>
+            {% endfor %}
+            <a href="{{ url_for('positie_tags_bewerken', gebruiker_id=gebruiker.id, pos_id=r.pos.id) }}"
+               class="btn btn-link btn-sm p-0 text-muted" title="Tags bewerken">
+              <i class="bi bi-pencil-square"></i>
+            </a>
+          </td>
+          <td class="text-end">{{ r.pos.aantal | compact_float }}</td>
+          <td class="text-end d-none d-sm-table-cell text-muted small">{{ eur(r.pos.aankoopprijs) }}</td>
+          <td class="text-end">
+            {% if r.koers is not none %}
+              {{ geld(r.koers, r.valuta) }}
+            {% else %}
+              <span class="text-muted">—</span>
+            {% endif %}
+          </td>
+          <td class="text-end fw-semibold">
+            {% if r.waarde is not none %}{{ eur(r.waarde) }}{% else %}<span class="text-muted">—</span>{% endif %}
+          </td>
+          <td class="text-end d-none d-sm-table-cell small {{ kleur(r.dag_winst) }}">
+            {% if r.koers is not none %}
+              {{ teken(r.dag_winst) }}{{ eur(r.dag_winst) }}<br>
+              <span class="opacity-75">{{ pct(r.dag_pct) }}</span>
+            {% else %}—{% endif %}
+          </td>
+          <td class="text-end small {{ kleur(r.winst) if r.winst is not none else '' }}">
+            {% if r.winst is not none %}
+              {{ teken(r.winst) }}{{ eur(r.winst) }}<br>
+              <span class="opacity-75">{{ pct(r.winst_pct) }}</span>
+            {% else %}<span class="text-muted">—</span>{% endif %}
+          </td>
+          <td class="text-end">
+            <div class="d-inline-flex gap-2 align-items-center">
+              <a href="{{ url_for('positie_bewerken', gebruiker_id=gebruiker.id, pos_id=r.pos.id) }}"
+                 class="btn btn-link btn-sm text-secondary p-0" title="Positie bewerken">
+                <i class="bi bi-pencil"></i>
+              </a>
+              <form method="post"
+                    action="{{ url_for('positie_verwijderen', gebruiker_id=gebruiker.id, pos_id=r.pos.id) }}"
+                    onsubmit="return confirm('{{ r.pos.ticker }} verwijderen?')">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <button class="btn btn-link btn-sm text-danger p-0" title="Verwijder">
+                  <i class="bi bi-trash3"></i>
+                </button>
+              </form>
+            </div>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+      <tfoot class="table-light fw-semibold">
+        <tr>
+          <td colspan="6" class="d-none d-lg-table-cell">Totaal</td>
+          <td colspan="5" class="d-none d-sm-table-cell d-lg-none">Totaal</td>
+          <td colspan="4" class="d-sm-none">Totaal</td>
+          <td class="text-end">{{ eur(d.waarde) }}</td>
+          <td class="text-end d-none d-sm-table-cell {{ kleur(d.dag) }}">
+            {% if d.dag is not none %}{{ teken(d.dag) }}{{ eur(d.dag) }}{% else %}—{% endif %}
+          </td>
+          <td class="text-end {{ kleur(d.winst) }}">
+            {% if d.winst is not none %}{{ teken(d.winst) }}{{ eur(d.winst) }}{% else %}—{% endif %}
+          </td>
+          <td></td>
+        </tr>
+      </tfoot>
+    </table>
+  </div>
+  {% else %}
+  <div class="card-body text-muted small text-center py-3">
+    Geen posities —
+    <a href="{{ url_for('positie_toevoegen', gebruiker_id=gebruiker.id, account_id=d.account.id) }}">
+      voeg er een toe
+    </a>
+  </div>
+  {% endif %}
+</div>
+{% endfor %}
+
+{# ── Broker account toevoegen ──────────────────────────────────── #}
+<div class="card border-0 shadow-sm">
+  <div class="card-header bg-white border-bottom py-3">
+    <h6 class="mb-0 fw-semibold"><i class="bi bi-bank me-2 text-secondary"></i>Broker account toevoegen</h6>
+  </div>
+  <div class="card-body">
+    <form method="post" action="{{ url_for('account_toevoegen', gebruiker_id=gebruiker.id) }}"
+          class="d-flex gap-2">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <input type="text" class="form-control" name="naam"
+             placeholder="bijv. DEGIRO, Peaks, Crypto" required>
+      <button class="btn btn-outline-primary" type="submit">
+        <i class="bi bi-plus-lg me-1"></i>Toevoegen
+      </button>
+    </form>
+  </div>
+</div>
+
+{% endblock %}

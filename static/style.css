@@ -1,0 +1,22 @@
+.pos { color: #198754; }
+.neg { color: #dc3545; }
+
+.navbar-brand { letter-spacing: -.3px; }
+.nav-link { font-size: .9rem; }
+
+.card { border-radius: .75rem; }
+.card-header { border-radius: .75rem .75rem 0 0 !important; }
+
+tfoot td { font-size: .9rem; }
+
+/* ticker input: force uppercase display */
+#ticker { text-transform: uppercase; }
+#ticker::placeholder { text-transform: none; }
+
+/* Advies markdown rendering */
+.advies-tekst h2 { font-size: 1.1rem; font-weight: 700; margin-top: 1.2rem; }
+.advies-tekst h3 { font-size: 1rem;   font-weight: 600; margin-top: 1rem; }
+.advies-tekst ul { padding-left: 1.2rem; }
+.advies-tekst li { margin-bottom: .25rem; }
+.advies-tekst p  { margin-bottom: .6rem; }
+.advies-tekst em { color: #6c757d; font-size: .85rem; }

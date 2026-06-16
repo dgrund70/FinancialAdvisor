@@ -1,0 +1,53 @@
+{% extends "base.html" %}
+{% block content %}
+
+<div class="row justify-content-center">
+  <div class="col-12 col-md-6 col-lg-4">
+
+    <div class="text-center mb-4">
+      <i class="bi bi-graph-up-arrow fs-1 text-primary"></i>
+      <h4 class="fw-bold mt-2">Beleggingsdashboard</h4>
+      <p class="text-muted small">Kies een gebruiker of registreer je.</p>
+    </div>
+
+    {% if gebruikers %}
+    <div class="card border-0 shadow-sm mb-3">
+      <div class="card-header bg-white border-bottom py-3">
+        <h6 class="mb-0 fw-semibold"><i class="bi bi-people me-2 text-primary"></i>Gebruikers</h6>
+      </div>
+      <div class="list-group list-group-flush">
+        {% for g in gebruikers %}
+        <a href="{{ url_for('dashboard', gebruiker_id=g.id) }}"
+           class="list-group-item list-group-item-action d-flex align-items-center gap-3 py-3">
+          <span class="badge bg-primary rounded-pill" style="width:2rem;height:2rem;line-height:2rem;font-size:.85rem;">
+            {{ g.naam[0].upper() }}
+          </span>
+          <span class="fw-semibold">{{ g.naam }}</span>
+          <i class="bi bi-chevron-right ms-auto text-muted"></i>
+        </a>
+        {% endfor %}
+      </div>
+    </div>
+    {% endif %}
+
+    <div class="card border-0 shadow-sm">
+      <div class="card-header bg-white border-bottom py-3">
+        <h6 class="mb-0 fw-semibold"><i class="bi bi-person-plus me-2 text-secondary"></i>Nieuwe gebruiker</h6>
+      </div>
+      <div class="card-body">
+        <form method="post" action="{{ url_for('gebruiker_registreren') }}">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <div class="input-group">
+            <input type="text" class="form-control" name="naam" placeholder="Naam" required>
+            <button class="btn btn-primary" type="submit">
+              <i class="bi bi-arrow-right"></i>
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+{% endblock %}

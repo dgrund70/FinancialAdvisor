@@ -1,0 +1,223 @@
+{% extends "base.html" %}
+{% block content %}
+
+<div class="row justify-content-center">
+  <div class="col-12 col-md-7 col-lg-5">
+
+    <div class="d-flex align-items-center mb-3 gap-2">
+      <a href="{{ url_for('dashboard', gebruiker_id=gebruiker.id) }}" class="btn btn-link p-0 text-muted">
+        <i class="bi bi-arrow-left"></i>
+      </a>
+      <h5 class="mb-0 fw-semibold">
+        {{ 'Positie bewerken' if pos else 'Positie toevoegen' }} — {{ account.naam }}
+      </h5>
+    </div>
+
+    <div class="card border-0 shadow-sm">
+      <div class="card-body p-4">
+        <form method="post"
+              action="{{ url_for('positie_bewerken', gebruiker_id=gebruiker.id, pos_id=pos.id)
+                         if pos else
+                         url_for('positie_toevoegen', gebruiker_id=gebruiker.id, account_id=account.id) }}"
+              novalidate>
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+          {# Ticker #}
+          <div class="mb-3">
+            <label for="ticker" class="form-label">Ticker</label>
+            <div class="position-relative">
+              <input type="text" class="form-control text-uppercase" id="ticker" name="ticker"
+                     placeholder="bijv. VWCE of Vanguard…" required autocomplete="off"
+                     value="{{ form_data.get('ticker', '') }}">
+              <div id="ticker-suggesties" class="list-group position-absolute w-100 shadow-sm"
+                   style="z-index:1000; top:100%; display:none; max-height:16rem; overflow-y:auto;"></div>
+            </div>
+            <div class="form-text">
+              Typ een naam of ticker en kies uit de suggesties (bijv. <code>VWCE</code> → <code>VWCE.AS</code>).
+              Crypto: <code>BTC-EUR</code>, <code>ETH-EUR</code>.
+            </div>
+          </div>
+
+          {# Naam #}
+          <div class="mb-3">
+            <label for="naam" class="form-label">Naam <span class="text-muted fw-normal">(optioneel)</span></label>
+            <input type="text" class="form-control" id="naam" name="naam"
+                   placeholder="bijv. Vanguard FTSE All-World"
+                   value="{{ form_data.get('naam', '') }}">
+          </div>
+
+          {# Aantal + aankoopprijs #}
+          <div class="row g-3 mb-3">
+            <div class="col-6">
+              <label for="aantal" class="form-label">Aantal</label>
+              <input type="number" class="form-control" id="aantal" name="aantal"
+                     step="any" min="0.000001" placeholder="10" required
+                     value="{{ form_data.get('aantal', '') }}">
+            </div>
+            <div class="col-6">
+              <label for="aankoopprijs" class="form-label">Aankoopprijs (€)</label>
+              <input type="number" class="form-control" id="aankoopprijs" name="aankoopprijs"
+                     step="any" min="0.000001" placeholder="150.00" required
+                     value="{{ form_data.get('aankoopprijs', '') }}">
+            </div>
+          </div>
+
+          {# Aankoopdatum #}
+          <div class="mb-3">
+            <label for="aankoopdatum" class="form-label">
+              Aankoopdatum <span class="text-muted fw-normal">(optioneel)</span>
+            </label>
+            <input type="date" class="form-control" id="aankoopdatum" name="aankoopdatum"
+                   value="{{ form_data.get('aankoopdatum', '') }}">
+          </div>
+
+          {# Koerstype #}
+          <div class="mb-3">
+            <label class="form-label">Koerstype</label>
+            <div class="d-flex gap-3">
+              <div class="form-check">
+                <input class="form-check-input" type="radio" name="koers_type" id="kt_live"
+                       value="live" onchange="toggleHandmatig(this)"
+                       {{ 'checked' if form_data.get('koers_type', 'live') == 'live' }}>
+                <label class="form-check-label" for="kt_live">Live (API)</label>
+              </div>
+              <div class="form-check">
+                <input class="form-check-input" type="radio" name="koers_type" id="kt_handmatig"
+                       value="handmatig" onchange="toggleHandmatig(this)"
+                       {{ 'checked' if form_data.get('koers_type') == 'handmatig' }}>
+                <label class="form-check-label" for="kt_handmatig">Handmatig</label>
+              </div>
+            </div>
+            <div class="form-text">Gebruik "Handmatig" voor posities zonder live koers (bijv. robo-advisor).</div>
+          </div>
+
+          {# Handmatige koers (verborgen tenzij handmatig geselecteerd) #}
+          <div class="mb-3" id="handmatig_veld"
+               style="{{ '' if form_data.get('koers_type') == 'handmatig' else 'display:none' }}">
+            <label for="handmatige_koers" class="form-label">Huidige koers (€)</label>
+            <input type="number" class="form-control" id="handmatige_koers" name="handmatige_koers"
+                   step="any" min="0" placeholder="bijv. 98.50"
+                   value="{{ form_data.get('handmatige_koers', '') }}">
+          </div>
+
+          {# Tags #}
+          {% if alle_tags %}
+          <div class="mb-4">
+            <label class="form-label">Tags <span class="text-muted fw-normal">(optioneel)</span></label>
+            <div class="d-flex flex-wrap gap-2">
+              {% for tag in alle_tags %}
+              <div class="form-check form-check-inline m-0">
+                <input class="form-check-input" type="checkbox" name="tag_ids"
+                       id="tag_{{ tag.id }}" value="{{ tag.id }}"
+                       {{ 'checked' if tag.id in geselecteerde_tag_ids }}>
+                <label class="form-check-label badge bg-primary bg-opacity-10 text-primary border border-primary-subtle"
+                       for="tag_{{ tag.id }}">
+                  {{ tag.naam }}
+                </label>
+              </div>
+              {% endfor %}
+            </div>
+          </div>
+          {% else %}
+          <div class="mb-4">
+            <p class="text-muted small">
+              Nog geen tags.
+              <a href="{{ url_for('tags_overzicht', gebruiker_id=gebruiker.id) }}">Tags aanmaken</a>
+            </p>
+          </div>
+          {% endif %}
+
+          <div class="d-grid gap-2">
+            <button type="submit" class="btn btn-primary">
+              {% if pos %}<i class="bi bi-check-lg me-1"></i>Opslaan
+              {% else %}<i class="bi bi-plus-lg me-1"></i>Toevoegen{% endif %}
+            </button>
+            <a href="{{ url_for('dashboard', gebruiker_id=gebruiker.id) }}"
+               class="btn btn-outline-secondary">Annuleren</a>
+          </div>
+
+        </form>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<script>
+function toggleHandmatig(radio) {
+  document.getElementById('handmatig_veld').style.display =
+    radio.value === 'handmatig' ? '' : 'none';
+}
+
+// ── Ticker-autocomplete via Yahoo-zoek-API ───────────────────────
+(function () {
+  const input = document.getElementById('ticker');
+  const naam  = document.getElementById('naam');
+  const box   = document.getElementById('ticker-suggesties');
+  if (!input || !box) return;
+
+  let timer = null, items = [], actief = -1;
+
+  function verberg() { box.style.display = 'none'; box.innerHTML = ''; items = []; actief = -1; }
+
+  function markeer() {
+    [...box.children].forEach((el, i) => el.classList.toggle('active', i === actief));
+  }
+
+  function toon(resultaten) {
+    items = resultaten;
+    if (!resultaten.length) { verberg(); return; }
+    box.innerHTML = resultaten.map((r, i) =>
+      `<button type="button" class="list-group-item list-group-item-action py-2" data-i="${i}">
+         <span class="fw-semibold">${r.symbol}</span>
+         <span class="text-muted small ms-2">${r.beurs || ''}</span>
+         <div class="text-muted small text-truncate">${r.naam || ''}</div>
+       </button>`).join('');
+    actief = -1;
+    box.style.display = '';
+  }
+
+  function kies(i) {
+    const r = items[i];
+    if (!r) return;
+    input.value = r.symbol;
+    if (naam && !naam.value && r.naam) naam.value = r.naam;
+    verberg();
+  }
+
+  async function zoek() {
+    const q = input.value.trim();
+    if (q.length < 2) { verberg(); return; }
+    try {
+      const res  = await fetch('{{ url_for("ticker_zoeken") }}?q=' + encodeURIComponent(q));
+      const data = await res.json();
+      toon(data.resultaten || []);
+    } catch (e) { verberg(); }
+  }
+
+  input.addEventListener('input', () => { clearTimeout(timer); timer = setTimeout(zoek, 250); });
+
+  input.addEventListener('keydown', (e) => {
+    const zichtbaar = box.style.display !== 'none' && items.length;
+    if (e.key === 'ArrowDown' && zichtbaar) {
+      e.preventDefault(); actief = Math.min(actief + 1, items.length - 1); markeer();
+    } else if (e.key === 'ArrowUp' && zichtbaar) {
+      e.preventDefault(); actief = Math.max(actief - 1, 0); markeer();
+    } else if (e.key === 'Enter') {
+      if (zichtbaar && actief >= 0) { e.preventDefault(); kies(actief); }
+      else if (input.value.trim().length >= 2 && !zichtbaar) { e.preventDefault(); clearTimeout(timer); zoek(); }
+    } else if (e.key === 'Escape') {
+      verberg();
+    }
+  });
+
+  box.addEventListener('mousedown', (e) => {
+    const btn = e.target.closest('[data-i]');
+    if (btn) { e.preventDefault(); kies(parseInt(btn.dataset.i, 10)); }
+  });
+
+  input.addEventListener('blur', () => setTimeout(verberg, 150));
+})();
+</script>
+
+{% endblock %}

@@ -1,0 +1,337 @@
+{% extends "base.html" %}
+{% block content %}
+
+{# ── Risico-macro's (1=zeer defensief … 5=zeer offensief) ─────── #}
+{% set _risico_labels  = {1:'Zeer defensief', 2:'Defensief', 3:'Neutraal', 4:'Offensief', 5:'Zeer offensief'} %}
+{% set _risico_kleuren = {1:'success', 2:'success', 3:'warning', 4:'danger', 5:'danger'} %}
+{% macro risico_badge(adv) %}
+  {% if adv.risico_score %}
+    <span class="badge bg-{{ _risico_kleuren.get(adv.risico_score, 'secondary') }}"
+          title="{{ adv.risico_reden or '' }}">
+      <i class="bi bi-shield-exclamation me-1"></i>Risico {{ adv.risico_score }}/5
+      · {{ _risico_labels.get(adv.risico_score, '?') }}
+    </span>
+  {% endif %}
+{% endmacro %}
+
+{# ── API-key waarschuwing ──────────────────────────────────────── #}
+{% if not heeft_api_key %}
+<div class="alert alert-warning d-flex align-items-center gap-2 mb-3">
+  <i class="bi bi-key fs-5"></i>
+  <span>
+    <strong>ANTHROPIC_API_KEY niet ingesteld.</strong>
+    Stel hem in met <code>export ANTHROPIC_API_KEY=sk-ant-…</code> en herstart de app.
+  </span>
+</div>
+{% endif %}
+
+{# ── Toolbar ──────────────────────────────────────────────────── #}
+<div class="d-flex justify-content-between align-items-center mb-4 flex-wrap gap-2">
+  <h5 class="mb-0 fw-semibold"><i class="bi bi-lightbulb me-2 text-warning"></i>Adviesmodule</h5>
+  <div class="d-flex gap-2 flex-wrap">
+    <form method="post" action="{{ url_for('nieuws_verversen', gebruiker_id=gebruiker.id) }}">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <button class="btn btn-outline-secondary btn-sm">
+        <i class="bi bi-newspaper me-1"></i>Ververs nieuws
+      </button>
+    </form>
+    <form method="post" action="{{ url_for('advies_genereer', gebruiker_id=gebruiker.id) }}">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <button class="btn btn-primary btn-sm" {{ 'disabled' if not heeft_api_key }}>
+        <i class="bi bi-stars me-1"></i>Genereer advies
+      </button>
+    </form>
+  </div>
+</div>
+
+{# ── Waardeontwikkeling grafiek ────────────────────────────────── #}
+{% if waarde_serie and waarde_serie | length > 0 %}
+<div class="card border-0 shadow-sm mb-4">
+  <div class="card-header bg-white border-bottom py-3">
+    <h6 class="mb-0 fw-semibold">
+      <i class="bi bi-graph-up me-2 text-success"></i>Waardeontwikkeling
+      <span class="text-muted fw-normal small">· laatste 14 dagen</span>
+    </h6>
+  </div>
+  <div class="card-body">
+    <canvas id="waardeChart" height="90"></canvas>
+  </div>
+</div>
+{% endif %}
+
+{# ── Prestatie advies-tips ─────────────────────────────────────── #}
+{% if tips_prestatie %}
+<div class="card border-0 shadow-sm mb-4">
+  <div class="card-header bg-white border-bottom py-3">
+    <h6 class="mb-0 fw-semibold">
+      <i class="bi bi-bullseye me-2 text-primary"></i>Prestatie van advies-tips
+      <span class="text-muted fw-normal small">· rendement sinds eerste aanbeveling</span>
+    </h6>
+  </div>
+  <div class="table-responsive">
+    <table class="table table-sm table-hover align-middle mb-0">
+      <thead class="table-light">
+        <tr>
+          <th>Ticker</th>
+          <th class="d-none d-sm-table-cell">Aangeraden</th>
+          <th class="text-end">Instapkoers</th>
+          <th class="text-end">Huidige koers</th>
+          <th class="text-end">Rendement</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for t in tips_prestatie %}
+        <tr>
+          <td class="fw-semibold">{{ t.ticker }}</td>
+          <td class="d-none d-sm-table-cell text-muted small">{{ t.sinds }}</td>
+          <td class="text-end small">
+            {% if t.instap %}{{ "%.2f"|format(t.instap) }} {{ t.valuta }}{% else %}—{% endif %}
+          </td>
+          <td class="text-end small">
+            {% if t.huidig %}{{ "%.2f"|format(t.huidig) }} {{ t.valuta }}
+            {% else %}<span class="text-muted">—</span>{% endif %}
+          </td>
+          <td class="text-end fw-semibold
+              {{ 'pos' if t.rendement and t.rendement > 0
+                 else 'neg' if t.rendement and t.rendement < 0
+                 else 'text-muted' }}">
+            {% if t.rendement is not none %}
+              {{ '+' if t.rendement > 0 else '' }}{{ t.rendement }}%
+            {% else %}
+              <span class="text-muted small">ververs koersen</span>
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endif %}
+
+<div class="row g-4">
+
+  {# ── Linkerkolom: generiek advies + tag-adviezen ─────────────── #}
+  <div class="col-12 col-lg-7">
+
+    {# Generiek advies #}
+    {% if advies %}
+    <div class="card border-0 shadow-sm mb-4">
+      <div class="card-header bg-white border-bottom d-flex justify-content-between align-items-center py-3 flex-wrap gap-2">
+        <h6 class="mb-0 fw-semibold">
+          <i class="bi bi-robot me-2 text-primary"></i>Generiek advies
+          {{ risico_badge(advies) }}
+        </h6>
+        <small class="text-muted">
+          {{ advies.gegenereerd.strftime('%d-%m-%Y %H:%M') }} &bull; {{ advies.model }}
+        </small>
+      </div>
+      <div class="card-body advies-tekst">
+        {% if advies.risico_score %}
+        <div class="alert alert-{{ _risico_kleuren.get(advies.risico_score, 'secondary') }} bg-opacity-10 border-0 py-2 small mb-3">
+          <strong>Risiconiveau {{ advies.risico_score }}/5 — {{ _risico_labels.get(advies.risico_score, '?') }}.</strong>
+          {{ advies.risico_reden or '' }}
+        </div>
+        {% endif %}
+        {{ advies.advies_tekst | markdown }}
+      </div>
+    </div>
+    {% else %}
+    <div class="card border-0 shadow-sm mb-4">
+      <div class="card-body text-center py-5 text-muted">
+        <i class="bi bi-lightbulb fs-1 d-block mb-3"></i>
+        <p class="mb-3">Nog geen advies gegenereerd.</p>
+        {% if heeft_api_key %}
+          <p class="small">Ververs eerst het nieuws, dan klik op <strong>Genereer advies</strong>.</p>
+        {% else %}
+          <p class="small">Stel <code>ANTHROPIC_API_KEY</code> in om te beginnen.</p>
+        {% endif %}
+      </div>
+    </div>
+    {% endif %}
+
+    {# Tag-adviezen #}
+    {% if tags %}
+    <div class="card border-0 shadow-sm mb-4">
+      <div class="card-header bg-white border-bottom py-3">
+        <h6 class="mb-0 fw-semibold">
+          <i class="bi bi-tags me-2 text-primary"></i>Advies per tag
+        </h6>
+      </div>
+      <div class="accordion accordion-flush" id="tagAdviezen">
+        {% for tag in tags %}
+        <div class="accordion-item border-0 border-bottom">
+          <h2 class="accordion-header">
+            <button class="accordion-button collapsed py-3" type="button"
+                    data-bs-toggle="collapse" data-bs-target="#tag-adv-{{ tag.id }}">
+              <span class="badge bg-primary bg-opacity-10 text-primary border border-primary-subtle me-2">
+                {{ tag.naam }}
+              </span>
+              {% if tag_adviezen.get(tag) %}
+                <small class="text-muted ms-2">
+                  {{ tag_adviezen[tag].gegenereerd.strftime('%d-%m-%Y %H:%M') }}
+                </small>
+              {% else %}
+                <small class="text-muted ms-2">Nog geen advies</small>
+              {% endif %}
+            </button>
+          </h2>
+          <div id="tag-adv-{{ tag.id }}" class="accordion-collapse collapse"
+               data-bs-parent="#tagAdviezen">
+            <div class="accordion-body">
+              {% if tag_adviezen.get(tag) %}
+                <div class="advies-tekst">
+                  {{ tag_adviezen[tag].advies_tekst | markdown }}
+                </div>
+              {% endif %}
+              <form method="post" action="{{ url_for('advies_genereer', gebruiker_id=gebruiker.id) }}"
+                    class="mt-3">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <input type="hidden" name="tag_id" value="{{ tag.id }}">
+                <button class="btn btn-outline-primary btn-sm" {{ 'disabled' if not heeft_api_key }}>
+                  <i class="bi bi-stars me-1"></i>Genereer advies voor "{{ tag.naam }}"
+                </button>
+              </form>
+            </div>
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+    {% endif %}
+
+    {# Advieshistorie #}
+    {% if historie %}
+    <div class="card border-0 shadow-sm mb-4">
+      <div class="card-header bg-white border-bottom py-3">
+        <h6 class="mb-0 fw-semibold">
+          <i class="bi bi-clock-history me-2 text-secondary"></i>Eerdere adviezen
+          <span class="text-muted fw-normal small">· laatste 14 dagen</span>
+        </h6>
+      </div>
+      <div class="accordion accordion-flush" id="adviesHistorie">
+        {% for ouder in historie %}
+        <div class="accordion-item border-0 border-bottom">
+          <h2 class="accordion-header">
+            <button class="accordion-button collapsed py-2" type="button"
+                    data-bs-toggle="collapse" data-bs-target="#adv-{{ ouder.id }}">
+              <i class="bi bi-robot me-2 text-primary"></i>
+              {{ ouder.gegenereerd.strftime('%d-%m-%Y %H:%M') }}
+              <span class="badge bg-light text-muted border ms-2 fw-normal">{{ ouder.model }}</span>
+              {{ risico_badge(ouder) }}
+            </button>
+          </h2>
+          <div id="adv-{{ ouder.id }}" class="accordion-collapse collapse"
+               data-bs-parent="#adviesHistorie">
+            <div class="accordion-body advies-tekst">
+              {{ ouder.advies_tekst | markdown }}
+            </div>
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+    {% endif %}
+
+  </div>
+
+  {# ── Rechterkolom: nieuws per positie ─────────────────────────── #}
+  <div class="col-12 col-lg-5">
+
+    {% if ticker_nieuws %}
+    <div class="card border-0 shadow-sm mb-4">
+      <div class="card-header bg-white border-bottom py-3">
+        <h6 class="mb-0 fw-semibold">
+          <i class="bi bi-newspaper me-2 text-secondary"></i>Nieuws per positie
+        </h6>
+      </div>
+      <div class="accordion accordion-flush" id="tickerNieuws">
+        {% for ticker, artikelen in ticker_nieuws.items() %}
+        <div class="accordion-item border-0 border-bottom">
+          <h2 class="accordion-header">
+            <button class="accordion-button collapsed py-2 fw-semibold" type="button"
+                    data-bs-toggle="collapse"
+                    data-bs-target="#tn-{{ ticker | replace('.', '-') }}">
+              {{ ticker }}
+              <span class="badge bg-secondary ms-2 fw-normal">{{ artikelen | length }}</span>
+            </button>
+          </h2>
+          <div id="tn-{{ ticker | replace('.', '-') }}" class="accordion-collapse collapse"
+               data-bs-parent="#tickerNieuws">
+            <ul class="list-group list-group-flush">
+              {% for art in artikelen %}
+              <li class="list-group-item py-2 px-3">
+                <a href="{{ art.url }}" target="_blank" rel="noopener"
+                   class="text-decoration-none text-body">
+                  {{ art.titel }}
+                </a>
+                <div class="text-muted small mt-1">
+                  {{ art.bron }}
+                  {% if art.gepubliceerd %}
+                    &bull; {{ art.gepubliceerd.strftime('%d-%m %H:%M') }}
+                  {% endif %}
+                </div>
+              </li>
+              {% endfor %}
+            </ul>
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+    {% endif %}
+
+  </div>
+</div>
+
+{% if waarde_serie and waarde_serie | length > 0 %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"
+        integrity="sha384-NrKB+u6Ts6AtkIhwPixiKTzgSKNblyhlk0Sohlgar9UHUBzai/sgnNNWWd291xqt"
+        crossorigin="anonymous"></script>
+<script>
+  const ws = {{ waarde_serie | tojson }};
+  const risicoKleur = { 1: "#198754", 2: "#198754", 3: "#ffc107", 4: "#dc3545", 5: "#dc3545" };
+  const risicoLabel = { 1: "Zeer defensief", 2: "Defensief", 3: "Neutraal", 4: "Offensief", 5: "Zeer offensief" };
+  const puntKleuren = ws.map(d => risicoKleur[d.risico] || "#adb5bd");
+  new Chart(document.getElementById("waardeChart"), {
+    type: "line",
+    data: {
+      labels: ws.map(d => d.datum),
+      datasets: [
+        {
+          label: "Portefeuillewaarde (€)",
+          data: ws.map(d => d.waarde),
+          borderColor: "#198754",
+          backgroundColor: "rgba(25,135,84,.10)",
+          fill: true, tension: .3,
+          pointRadius: 5, pointHoverRadius: 7,
+          pointBackgroundColor: puntKleuren, pointBorderColor: puntKleuren,
+        },
+        {
+          label: "Inleg / kostprijs (€)",
+          data: ws.map(d => d.kosten),
+          borderColor: "#adb5bd",
+          borderDash: [6, 4], fill: false, tension: 0, pointRadius: 0,
+        },
+      ],
+    },
+    options: {
+      responsive: true,
+      interaction: { mode: "index", intersect: false },
+      plugins: {
+        legend: { position: "bottom" },
+        tooltip: { callbacks: {
+          label: c => `${c.dataset.label}: €${(c.parsed.y ?? 0).toLocaleString("nl-NL")}`,
+          afterBody: items => {
+            const r = ws[items[0].dataIndex].risico;
+            return r ? `Risico: ${r}/5 · ${risicoLabel[r]}` : "Risico: niet bepaald";
+          },
+        } },
+      },
+      scales: { y: { ticks: { callback: v => "€" + v } } },
+    },
+  });
+</script>
+{% endif %}
+
+{% endblock %}

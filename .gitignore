@@ -1,0 +1,20 @@
+# ── Python ───────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+
+# ── Persoonlijke / gegenereerde data — NIET publiceren ───
+# Bevat je portefeuille, koersen, DB-backups en SQLite-journals.
+# Alles in data/ wordt genegeerd, behalve de placeholder .gitkeep.
+data/*
+!data/.gitkeep
+
+# ── Secrets & lokale config ──────────────────────────────
+.env
+.env.*
+.claude/settings.local.json
+
+# ── macOS ────────────────────────────────────────────────
+.DS_Store
