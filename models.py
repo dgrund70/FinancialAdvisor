@@ -172,6 +172,7 @@ class Fundamental(db.Model):
     ticker             = db.Column(db.String(20), nullable=False, unique=True, index=True)
     naam               = db.Column(db.String(120), nullable=True)
     sector             = db.Column(db.String(80), nullable=True)
+    land               = db.Column(db.String(60), nullable=True)   # country (regio-allocatie)
     markt_kap          = db.Column(db.Float, nullable=True)   # marketCap
     pe                 = db.Column(db.Float, nullable=True)   # trailingPE
     forward_pe         = db.Column(db.Float, nullable=True)   # forwardPE
@@ -186,3 +187,17 @@ class Fundamental(db.Model):
     aanbeveling        = db.Column(db.String(30), nullable=True)  # recommendationKey
     valuta             = db.Column(db.String(10), nullable=True)
     opgehaald          = db.Column(db.DateTime, default=datetime.utcnow)
+
+
+class KoersHistorie(db.Model):
+    """Dagelijkse EUR-slotkoersen per ticker (holdings + benchmark), voor de
+    risico-analyse (volatiliteit, max drawdown, beta). Gevuld door
+    fetch_historie.py; USD-noteringen worden met historische FX naar EUR gezet."""
+    __tablename__ = "koers_historie"
+    id     = db.Column(db.Integer, primary_key=True)
+    ticker = db.Column(db.String(20), nullable=False, index=True)
+    datum  = db.Column(db.Date, nullable=False, index=True)
+    koers  = db.Column(db.Float, nullable=False)   # EUR-slotkoers
+    __table_args__ = (
+        db.UniqueConstraint("ticker", "datum", name="uq_historie_ticker_datum"),
+    )

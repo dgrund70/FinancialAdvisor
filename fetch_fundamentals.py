@@ -22,6 +22,7 @@ DB_PATH    = SCRIPT_DIR / "data" / "app.db"
 VELDEN = {
     "naam":               ("longName", "shortName"),
     "sector":             ("sector",),
+    "land":               ("country",),
     "markt_kap":          ("marketCap",),
     "pe":                 ("trailingPE",),
     "forward_pe":         ("forwardPE",),

@@ -22,12 +22,14 @@ from flask_wtf.csrf import CSRFProtect
 from markupsafe import Markup, escape
 from sqlalchemy import inspect as sa_inspect, text
 from sqlalchemy.orm import selectinload
-from helpers import naar_eur, xirr, benchmark_eindwaarde
+from helpers import (naar_eur, xirr, benchmark_eindwaarde,
+                     dagrendementen, volatiliteit, max_drawdown, beta)
 from models import (Advies, Aanbeveling, BenchmarkPunt, BENCHMARKS,
-                    BrokerAccount, Gebruiker, NieuwsArtikel, Positie, Tag,
-                    Transactie, TRANSACTIE_TYPES, db)
+                    BrokerAccount, Fundamental, Gebruiker, KoersHistorie,
+                    NieuwsArtikel, Positie, Tag, Transactie, TRANSACTIE_TYPES, db)
 from projectie import (cash_saldi, herbereken_alles, herbereken_positie,
                        na_transactie_wijziging)
+from fetch_prices import is_crypto
 
 try:
     import markdown as _md
@@ -372,6 +374,142 @@ def dashboard(gebruiker_id):
         benchmarks   = benchmarks,
         heeft_flows  = bool(grand_flows),
         bijgewerkt   = bijgewerkt,
+    )
+
+
+# ── Analyse: allocatie & risico ───────────────────────────────────
+
+def _classificeer_type(ticker, heeft_sector):
+    if is_crypto(ticker):
+        return "Crypto"
+    return "Aandeel" if heeft_sector else "ETF / overig"
+
+
+def _laad_historie(tickers):
+    """{ticker: ([datums], [koersen])} uit koers_historie, chronologisch."""
+    res = {}
+    rows = (KoersHistorie.query
+            .filter(KoersHistorie.ticker.in_(list(tickers)))
+            .order_by(KoersHistorie.ticker, KoersHistorie.datum).all())
+    for r in rows:
+        datums, koersen = res.setdefault(r.ticker, ([], []))
+        datums.append(r.datum)
+        koersen.append(r.koers)
+    return res
+
+
+def _portefeuille_risico(holdings, benchmark_ticker="IWDA.AS", venster=252):
+    """holdings: lijst van (ticker, aantal). Reconstrueert de dagelijkse EUR-
+    waarde van het huidige mandje en geeft volatiliteit, max drawdown en beta.
+    Werkt op de holdings waarvoor historie beschikbaar is (dekking)."""
+    if not holdings:
+        return None
+    hist   = _laad_historie({t for t, _ in holdings} | {benchmark_ticker})
+    gedekt = [(t, a) for t, a in holdings if t in hist and len(hist[t][0]) > 2]
+    if not gedekt:
+        return {"dekking": 0, "totaal_holdings": len(holdings), "te_weinig_data": True}
+
+    serie  = {t: dict(zip(hist[t][0], hist[t][1])) for t, _ in gedekt}
+    gemeen = set.intersection(*[set(serie[t]) for t, _ in gedekt])
+    bench  = dict(zip(hist[benchmark_ticker][0], hist[benchmark_ticker][1])) \
+             if benchmark_ticker in hist else None
+    if bench:
+        gemeen &= set(bench)
+    gemeen = sorted(gemeen)[-venster:]
+    if len(gemeen) < 20:
+        return {"dekking": len(gedekt), "totaal_holdings": len(holdings),
+                "te_weinig_data": True}
+
+    waarden   = [sum(a * serie[t][d] for t, a in gedekt) for d in gemeen]
+    port_rend = dagrendementen(waarden)
+    res = {
+        "volatiliteit":    volatiliteit(port_rend),
+        "max_drawdown":    max_drawdown(waarden),
+        "beta":            None,
+        "dekking":         len(gedekt),
+        "totaal_holdings": len(holdings),
+        "dagen":           len(gemeen),
+        "te_weinig_data":  False,
+    }
+    if bench:
+        res["beta"] = beta(port_rend, dagrendementen([bench[d] for d in gemeen]))
+    return res
+
+
+@app.route("/gebruiker/<int:gebruiker_id>/analyse")
+def analyse(gebruiker_id):
+    gebruiker = Gebruiker.query.get_or_404(gebruiker_id)
+    koersen, bijgewerkt, wisselkoersen = laad_prijzen()
+    accounts = (BrokerAccount.query.filter_by(gebruiker_id=gebruiker_id)
+                .options(selectinload(BrokerAccount.posities)).all())
+
+    # Huidige EUR-waarde + aantal per ticker, geaggregeerd over accounts.
+    waarde_per_ticker = {}
+    aantal_per_ticker = {}
+    valuta_per_ticker = {}
+    totaal = 0.0
+    for account in accounts:
+        rows, *_ = bereken_posities(account.posities, koersen, wisselkoersen)
+        for r in rows:
+            if r["waarde"] is None:
+                continue
+            t = r["pos"].ticker
+            waarde_per_ticker[t] = waarde_per_ticker.get(t, 0.0) + r["waarde"]
+            aantal_per_ticker[t] = aantal_per_ticker.get(t, 0.0) + (r["pos"].aantal or 0.0)
+            valuta_per_ticker[t] = r["pos"].valuta or "EUR"
+            totaal += r["waarde"]
+
+    funds = {f.ticker: f for f in Fundamental.query
+             .filter(Fundamental.ticker.in_(list(waarde_per_ticker) or [""])).all()}
+
+    def _bucket(sleutelfn):
+        agg = {}
+        for t, w in waarde_per_ticker.items():
+            k = sleutelfn(t)
+            agg[k] = agg.get(k, 0.0) + w
+        items = sorted(agg.items(), key=lambda kv: kv[1], reverse=True)
+        return [{"label": k, "waarde": v, "pct": (v / totaal * 100 if totaal else 0)}
+                for k, v in items]
+
+    sector_alloc = _bucket(lambda t: funds[t].sector if t in funds and funds[t].sector
+                           else "ETF / onbekend")
+    valuta_alloc = _bucket(lambda t: valuta_per_ticker.get(t, "EUR"))
+    type_alloc   = _bucket(lambda t: _classificeer_type(t, t in funds and bool(funds[t].sector)))
+    regio_alloc  = _bucket(lambda t: funds[t].land if t in funds and funds[t].land else "Onbekend")
+
+    holdings_sorted = sorted(
+        [{"ticker": t, "waarde": w, "pct": (w / totaal * 100 if totaal else 0),
+          "naam": (funds[t].naam if t in funds and funds[t].naam else t)}
+         for t, w in waarde_per_ticker.items()],
+        key=lambda h: h["waarde"], reverse=True)
+    top5      = sum(h["pct"] for h in holdings_sorted[:5])
+    hhi       = sum((h["pct"] / 100) ** 2 for h in holdings_sorted)
+    effectief = (1 / hhi) if hhi else 0
+
+    flags = []
+    for h in holdings_sorted:
+        if h["pct"] > 20:
+            flags.append(f"{h['ticker']} is {h['pct']:.0f}% van de portefeuille (>20%).")
+    for s in sector_alloc:
+        if s["pct"] > 40 and s["label"] != "ETF / onbekend":
+            flags.append(f"Sector '{s['label']}' is {s['pct']:.0f}% (>40%).")
+
+    risico = _portefeuille_risico([(t, a) for t, a in aantal_per_ticker.items()])
+
+    return render_template(
+        "analyse.html",
+        gebruiker        = gebruiker,
+        totaal           = totaal if totaal else None,
+        sector_alloc     = sector_alloc,
+        valuta_alloc     = valuta_alloc,
+        type_alloc       = type_alloc,
+        regio_alloc      = regio_alloc,
+        holdings         = holdings_sorted,
+        top5             = top5,
+        effectief        = effectief,
+        flags            = flags,
+        risico           = risico,
+        heeft_fundamentals = bool(funds),
     )
 
 
@@ -985,15 +1123,17 @@ def advies(gebruiker_id):
               .order_by(Advies.gegenereerd.desc())
               .first())
 
-    # Meest recente advies per tag
+    # Meest recente advies per tag — één query i.p.v. een query per tag; daarna
+    # in Python het nieuwste advies per tag pakken (desc-volgorde → eerste = nieuwste).
     tags = Tag.query.filter_by(gebruiker_id=gebruiker_id).order_by(Tag.naam).all()
+    tag_op_id = {t.id: t for t in tags}
     tag_adviezen = {}
-    for tag in tags:
-        a = (Advies.query
-             .filter_by(gebruiker_id=gebruiker_id, tag_id=tag.id)
-             .order_by(Advies.gegenereerd.desc())
-             .first())
-        if a:
+    for a in (Advies.query
+              .filter(Advies.gebruiker_id == gebruiker_id, Advies.tag_id.isnot(None))
+              .order_by(Advies.gegenereerd.desc())
+              .all()):
+        tag = tag_op_id.get(a.tag_id)
+        if tag is not None and tag not in tag_adviezen:
             tag_adviezen[tag] = a
 
     # Advieshistorie (14 dagen)
@@ -1036,9 +1176,11 @@ def advies(gebruiker_id):
             "risico": a.risico_score,
         })
 
-    # Prestatie aanbevelingen
+    # Prestatie aanbevelingen — eager-load aanbevelingen (voorkomt een query per advies)
     eerste_tip = {}
-    for a in Advies.query.filter_by(gebruiker_id=gebruiker_id).order_by(Advies.gegenereerd).all():
+    for a in (Advies.query.filter_by(gebruiker_id=gebruiker_id)
+              .options(selectinload(Advies.aanbevelingen))
+              .order_by(Advies.gegenereerd).all()):
         for rec in a.aanbevelingen:
             if rec.ticker not in eerste_tip:
                 eerste_tip[rec.ticker] = (rec, a.gegenereerd)
@@ -1123,6 +1265,15 @@ def fundamentals_verversen(gebruiker_id):
         "fundamentals",
         [sys.executable, str(BASE_DIR / "fetch_fundamentals.py")],
         timeout=120, klaar_bericht="Fundamentals bijgewerkt.")
+    return {"taak_id": taak_id, "al_bezig": al_bezig}
+
+
+@app.route("/historie/verversen", methods=["POST"])
+def historie_verversen():
+    taak_id, al_bezig = _start_taak(
+        "historie",
+        [sys.executable, str(BASE_DIR / "fetch_historie.py")],
+        timeout=180, klaar_bericht="Risico-data bijgewerkt.")
     return {"taak_id": taak_id, "al_bezig": al_bezig}
 
 

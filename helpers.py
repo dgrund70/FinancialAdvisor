@@ -98,3 +98,54 @@ def benchmark_eindwaarde(flows, prijs_op, vandaag):
     if not koers_nu or koers_nu <= 0:
         return None, None
     return eenheden * koers_nu, eenheden
+
+
+# ── Risico-statistiek (pure Python, geen numpy) ───────────────────
+
+def dagrendementen(koersen):
+    """Chronologische koersreeks → lijst van dag-op-dag rendementen."""
+    r = []
+    for vorige, huidig in zip(koersen, koersen[1:]):
+        if vorige:
+            r.append(huidig / vorige - 1.0)
+    return r
+
+
+def volatiliteit(rendementen, periodes=252):
+    """Geannualiseerde volatiliteit = std(dagrendementen) × √periodes. None bij <2."""
+    n = len(rendementen)
+    if n < 2:
+        return None
+    gem = sum(rendementen) / n
+    var = sum((x - gem) ** 2 for x in rendementen) / (n - 1)
+    return (var ** 0.5) * (periodes ** 0.5)
+
+
+def max_drawdown(waarden):
+    """Grootste piek-tot-dal daling als negatieve fractie (bijv. -0.23). None bij <2."""
+    if len(waarden) < 2:
+        return None
+    piek = waarden[0]
+    mdd = 0.0
+    for v in waarden:
+        if v > piek:
+            piek = v
+        if piek > 0:
+            dd = v / piek - 1.0
+            if dd < mdd:
+                mdd = dd
+    return mdd
+
+
+def beta(port_rendementen, bench_rendementen):
+    """Beta van de portefeuille t.o.v. de benchmark uit gepaarde dagrendementen."""
+    n = min(len(port_rendementen), len(bench_rendementen))
+    if n < 2:
+        return None
+    p = port_rendementen[-n:]
+    b = bench_rendementen[-n:]
+    gp = sum(p) / n
+    gb = sum(b) / n
+    cov = sum((pi - gp) * (bi - gb) for pi, bi in zip(p, b)) / (n - 1)
+    var = sum((bi - gb) ** 2 for bi in b) / (n - 1)
+    return cov / var if var else None

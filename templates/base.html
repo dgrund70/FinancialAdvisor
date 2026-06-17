@@ -28,6 +28,10 @@
          href="{{ url_for('advies', gebruiker_id=uid) }}">
         <i class="bi bi-lightbulb me-1"></i>Advies
       </a>
+      <a class="nav-link text-white-50 {% if request.endpoint == 'analyse' %}text-white{% endif %}"
+         href="{{ url_for('analyse', gebruiker_id=uid) }}">
+        <i class="bi bi-pie-chart me-1"></i>Analyse
+      </a>
       <a class="nav-link text-white-50 {% if 'tag' in (request.endpoint or '') %}text-white{% endif %}"
          href="{{ url_for('tags_overzicht', gebruiker_id=uid) }}">
         <i class="bi bi-tags me-1"></i>Tags
