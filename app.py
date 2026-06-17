@@ -4,7 +4,9 @@ import re
 import secrets
 import subprocess
 import sys
+import threading
 from datetime import datetime, timedelta
+from itertools import count
 from pathlib import Path
 
 # Laad .env als die bestaat (optioneel — werkt ook zonder)
@@ -18,6 +20,7 @@ from flask import Flask, flash, redirect, render_template, request, url_for
 from flask_wtf.csrf import CSRFProtect
 from markupsafe import Markup, escape
 from sqlalchemy import inspect as sa_inspect, text
+from sqlalchemy.orm import selectinload
 from helpers import naar_eur
 from models import (Advies, Aanbeveling, BrokerAccount, Gebruiker,
                     NieuwsArtikel, Positie, Tag, db)
@@ -230,11 +233,20 @@ def dashboard(gebruiker_id):
     gebruiker = Gebruiker.query.get_or_404(gebruiker_id)
     koersen, bijgewerkt, wisselkoersen = laad_prijzen()
 
+    # Eager-load accounts → posities → tags in enkele queries i.p.v. lazy
+    # loading per account/positie (voorkomt N+1 bij het renderen van het dashboard).
+    accounts = (BrokerAccount.query
+                .filter_by(gebruiker_id=gebruiker_id)
+                .options(selectinload(BrokerAccount.posities)
+                         .selectinload(Positie.tags))
+                .order_by(BrokerAccount.id)
+                .all())
+
     account_data = []
     grand_waarde = grand_kosten = grand_dag = 0.0
     grand_has_prices = False
 
-    for account in gebruiker.broker_accounts:
+    for account in accounts:
         rows, tw, tk, td = bereken_posities(account.posities, koersen, wisselkoersen)
         hp = tw is not None
         account_data.append({
@@ -498,24 +510,65 @@ def tag_verwijderen(gebruiker_id, tag_id):
     return redirect(url_for("tags_overzicht", gebruiker_id=gebruiker_id))
 
 
+# ── Achtergrondtaken (verversen koersen/nieuws/advies) ────────────
+# Verversingen draaien in een achtergrond-thread zodat het HTTP-verzoek niet
+# tot 120s blijft hangen. De status wordt in-memory bijgehouden; de frontend
+# pollt /taken/<id>/status en herlaadt de pagina zodra een taak klaar is.
+
+_taken       = {}
+_taken_lock  = threading.Lock()
+_taak_teller = count(1)
+
+
+def _draai_taak(taak_id, cmd, timeout, klaar_bericht):
+    cat, msg = "success", klaar_bericht
+    try:
+        subprocess.run(cmd, timeout=timeout, check=True)
+    except subprocess.TimeoutExpired:
+        cat, msg = "warning", "Bewerking duurde te lang en is afgebroken."
+    except subprocess.CalledProcessError as e:
+        cat, msg = "danger", f"Fout bij uitvoeren: {e}"
+    except Exception as e:
+        cat, msg = "danger", f"Onverwachte fout: {e}"
+    with _taken_lock:
+        _taken[taak_id].update(status="klaar", categorie=cat, bericht=msg)
+
+
+def _start_taak(naam, cmd, timeout, klaar_bericht):
+    """Start cmd in een achtergrond-thread. Voorkomt dubbele gelijktijdige runs
+    van dezelfde taaknaam. Geeft (taak_id, al_bezig) terug."""
+    with _taken_lock:
+        for tid, t in _taken.items():
+            if t["naam"] == naam and t["status"] == "bezig":
+                return tid, True
+        taak_id = f"{naam}-{next(_taak_teller)}"
+        _taken[taak_id] = {"naam": naam, "status": "bezig",
+                           "categorie": None, "bericht": None}
+    threading.Thread(target=_draai_taak,
+                     args=(taak_id, cmd, timeout, klaar_bericht),
+                     daemon=True).start()
+    return taak_id, False
+
+
+@app.route("/taken/<taak_id>/status")
+def taak_status(taak_id):
+    with _taken_lock:
+        t = _taken.get(taak_id)
+        if not t:
+            return {"status": "onbekend"}, 404
+        return {"status": t["status"], "categorie": t["categorie"],
+                "bericht": t["bericht"]}
+
+
 # ── Koersen ───────────────────────────────────────────────────────
 
 @app.route("/prijzen/verversen", methods=["POST"])
 def prijzen_verversen():
-    gebruiker_id = request.form.get("gebruiker_id", type=int)
-    try:
-        subprocess.run(
-            [sys.executable, str(BASE_DIR / "fetch_prices.py")],
-            timeout=60, check=True,
-        )
-        flash("Koersen bijgewerkt.", "success")
-    except subprocess.TimeoutExpired:
-        flash("Koersen ophalen duurde te lang.", "warning")
-    except subprocess.CalledProcessError as e:
-        flash(f"Fout bij ophalen koersen: {e}", "danger")
-    if gebruiker_id:
-        return redirect(url_for("dashboard", gebruiker_id=gebruiker_id))
-    return redirect(url_for("index"))
+    taak_id, al_bezig = _start_taak(
+        "koersen",
+        [sys.executable, str(BASE_DIR / "fetch_prices.py")],
+        timeout=60, klaar_bericht="Koersen bijgewerkt.")
+    return {"taak_id": taak_id, "al_bezig": al_bezig}
 
 
 # ── Ticker zoeken (autocomplete) ──────────────────────────────────
@@ -658,18 +711,25 @@ def advies(gebruiker_id):
         })
     tips_prestatie.sort(key=lambda t: (t["rendement"] is None, -(t["rendement"] or 0)))
 
-    # Ticker-nieuws voor posities van deze gebruiker
+    # Ticker-nieuws voor posities van deze gebruiker.
+    # Eén query voor alle tickers (i.p.v. een query per positie), daarna in
+    # Python groeperen en per ticker tot 5 meest recente artikelen bewaren.
     grens_nieuws = datetime.now() - timedelta(days=3)
+    tickers = {t for (t,) in
+               db.session.query(Positie.ticker)
+               .join(BrokerAccount, Positie.broker_account_id == BrokerAccount.id)
+               .filter(BrokerAccount.gebruiker_id == gebruiker_id).all()}
     ticker_nieuws = {}
-    for account in gebruiker.broker_accounts:
-        for pos in account.posities:
-            artikelen = (NieuwsArtikel.query
-                         .filter(NieuwsArtikel.ticker == pos.ticker,
-                                 NieuwsArtikel.opgeslagen >= grens_nieuws)
-                         .order_by(NieuwsArtikel.gepubliceerd.desc())
-                         .limit(5).all())
-            if artikelen:
-                ticker_nieuws[pos.ticker] = artikelen
+    if tickers:
+        artikelen = (NieuwsArtikel.query
+                     .filter(NieuwsArtikel.ticker.in_(tickers),
+                             NieuwsArtikel.opgeslagen >= grens_nieuws)
+                     .order_by(NieuwsArtikel.gepubliceerd.desc())
+                     .all())
+        for art in artikelen:
+            bucket = ticker_nieuws.setdefault(art.ticker, [])
+            if len(bucket) < 5:
+                bucket.append(art)
 
     return render_template(
         "advies.html",
@@ -687,38 +747,28 @@ def advies(gebruiker_id):
 
 @app.route("/gebruiker/<int:gebruiker_id>/advies/genereer", methods=["POST"])
 def advies_genereer(gebruiker_id):
-    gebruiker = Gebruiker.query.get_or_404(gebruiker_id)
+    Gebruiker.query.get_or_404(gebruiker_id)
     if not os.environ.get("ANTHROPIC_API_KEY"):
-        flash("Stel eerst ANTHROPIC_API_KEY in als omgevingsvariabele.", "danger")
-        return redirect(url_for("advies", gebruiker_id=gebruiker_id))
+        return {"taak_id": None,
+                "fout": "Stel eerst ANTHROPIC_API_KEY in als omgevingsvariabele."}, 400
     tag_id = request.form.get("tag_id", type=int)  # None = generiek
-    try:
-        cmd = [sys.executable, str(BASE_DIR / "advies_generator.py"),
-               "--gebruiker", str(gebruiker_id)]
-        if tag_id:
-            cmd += ["--tag", str(tag_id)]
-        subprocess.run(cmd, timeout=120, check=True)
-        flash("Advies gegenereerd.", "success")
-    except subprocess.TimeoutExpired:
-        flash("Advies genereren duurde te lang (>120s).", "warning")
-    except subprocess.CalledProcessError as e:
-        flash(f"Fout bij genereren advies: {e}", "danger")
-    return redirect(url_for("advies", gebruiker_id=gebruiker_id))
+    cmd = [sys.executable, str(BASE_DIR / "advies_generator.py"),
+           "--gebruiker", str(gebruiker_id)]
+    if tag_id:
+        cmd += ["--tag", str(tag_id)]
+    taak_id, al_bezig = _start_taak(
+        f"advies-{gebruiker_id}-{tag_id or 'generiek'}",
+        cmd, timeout=120, klaar_bericht="Advies gegenereerd.")
+    return {"taak_id": taak_id, "al_bezig": al_bezig}
 
 
 @app.route("/gebruiker/<int:gebruiker_id>/nieuws/verversen", methods=["POST"])
 def nieuws_verversen(gebruiker_id):
-    try:
-        subprocess.run(
-            [sys.executable, str(BASE_DIR / "fetch_news.py")],
-            timeout=120, check=True,
-        )
-        flash("Nieuws bijgewerkt.", "success")
-    except subprocess.TimeoutExpired:
-        flash("Nieuws ophalen duurde te lang.", "warning")
-    except subprocess.CalledProcessError as e:
-        flash(f"Fout bij ophalen nieuws: {e}", "danger")
-    return redirect(url_for("advies", gebruiker_id=gebruiker_id))
+    taak_id, al_bezig = _start_taak(
+        "nieuws",
+        [sys.executable, str(BASE_DIR / "fetch_news.py")],
+        timeout=120, klaar_bericht="Nieuws bijgewerkt.")
+    return {"taak_id": taak_id, "al_bezig": al_bezig}
 
 
 # ── Database initialisatie ────────────────────────────────────────

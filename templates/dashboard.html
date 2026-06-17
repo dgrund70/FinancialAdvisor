@@ -54,7 +54,7 @@
     {% endif %}
   </small>
   <div class="d-flex gap-2 flex-wrap">
-    <form method="post" action="{{ url_for('prijzen_verversen') }}">
+    <form method="post" action="{{ url_for('prijzen_verversen') }}" data-taak>
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
       <input type="hidden" name="gebruiker_id" value="{{ gebruiker.id }}">
       <button class="btn btn-outline-secondary btn-sm">
