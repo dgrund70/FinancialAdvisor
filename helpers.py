@@ -72,3 +72,29 @@ def xirr(cashflows, guess=0.1):
         else:
             lo, flo = mid, fmid
     return round((lo + hi) / 2.0, 6)
+
+
+def benchmark_eindwaarde(flows, prijs_op, vandaag):
+    """Simuleer de externe cashflows in een benchmark (deposit-matched).
+
+    `flows`: lijst van (date, bedrag_eur) zoals voor xirr() — storting negatief
+    (geld de portefeuille in), opname positief. `prijs_op(date)` geeft de
+    benchmark-koers (EUR) op of vóór die datum, of None.
+
+    Bij elke storting koop je `bedrag / koers` eenheden van de benchmark; bij
+    een opname verkoop je er evenveel als het opgenomen bedrag waard is. Geeft
+    (eindwaarde_eur, eenheden) terug, of (None, None) als een koers ontbreekt.
+    """
+    eenheden = 0.0
+    for d, bedrag in flows:
+        koers = prijs_op(d)
+        if not koers or koers <= 0:
+            return None, None
+        if bedrag < 0:        # storting → eenheden kopen
+            eenheden += (-bedrag) / koers
+        elif bedrag > 0:      # opname → eenheden verkopen
+            eenheden -= bedrag / koers
+    koers_nu = prijs_op(vandaag)
+    if not koers_nu or koers_nu <= 0:
+        return None, None
+    return eenheden * koers_nu, eenheden

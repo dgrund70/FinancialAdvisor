@@ -95,8 +95,67 @@
         <i class="bi bi-arrow-clockwise me-1"></i>Ververs koersen
       </button>
     </form>
+    <form method="post" action="{{ url_for('benchmark_verversen') }}" data-taak>
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <button class="btn btn-outline-secondary btn-sm">
+        <i class="bi bi-trophy me-1"></i>Ververs benchmark
+      </button>
+    </form>
   </div>
 </div>
+
+{# ── Benchmarkvergelijking (deposit-matched XIRR) ───────────────── #}
+{% if benchmarks %}
+<div class="card border-0 shadow-sm mb-4">
+  <div class="card-header bg-white border-bottom py-3">
+    <h6 class="mb-0 fw-semibold">
+      <i class="bi bi-trophy me-2 text-warning"></i>Benchmarkvergelijking
+      <span class="text-muted fw-normal small">· jouw stortingen, belegd in de index (XIRR)</span>
+    </h6>
+  </div>
+  <div class="table-responsive">
+    <table class="table table-hover align-middle mb-0">
+      <thead class="table-light">
+        <tr>
+          <th>Strategie</th>
+          <th class="text-end">Eindwaarde</th>
+          <th class="text-end">Rendement (XIRR)</th>
+          <th class="text-end">Δ vs jou</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr class="fw-semibold">
+          <td><i class="bi bi-person-circle me-1 text-primary"></i>Jouw portefeuille</td>
+          <td class="text-end">{{ eur(totaal.eind) }}</td>
+          <td class="text-end {{ kleur(totaal.xirr) }}">{{ xirr_fmt(totaal.xirr) }}</td>
+          <td class="text-end text-muted">—</td>
+        </tr>
+        {% for b in benchmarks %}
+        <tr>
+          <td>{{ b.label }} <span class="text-muted small">{{ b.ticker }}</span></td>
+          <td class="text-end">{{ eur(b.eind) }}</td>
+          <td class="text-end {{ kleur(b.xirr) }}">{{ xirr_fmt(b.xirr) }}</td>
+          <td class="text-end">
+            {% if totaal.xirr is not none and b.xirr is not none %}
+              {% set d = totaal.xirr - b.xirr %}
+              <span class="{{ kleur(d) }}">{{ '+' if d > 0 else '' }}{{ "%.1f"|format(d * 100) }} pp</span>
+            {% else %}<span class="text-muted">—</span>{% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <div class="card-footer bg-white small text-muted">
+    Zelfde stortingen, op dezelfde data, belegd in de index. <strong>Δ positief</strong> = jouw portefeuille presteert beter dan de index.
+  </div>
+</div>
+{% elif heeft_flows %}
+<div class="alert alert-light border small d-flex align-items-center gap-2">
+  <i class="bi bi-trophy text-warning"></i>
+  <span>Benchmarkvergelijking: nog geen indexkoersen geladen — klik op <strong>Ververs benchmark</strong>.</span>
+</div>
+{% endif %}
 
 {# ── Broker accounts ───────────────────────────────────────────── #}
 {% set heeft_posities = account_data | selectattr('rows') | list | length > 0 %}

@@ -9,6 +9,13 @@ db = SQLAlchemy()
 TRANSACTIE_TYPES = ("koop", "verkoop", "dividend",
                     "storting", "opname", "kosten", "correctie")
 
+# Benchmarks voor de "had ik beter de index kunnen kopen?"-vergelijking.
+# Gebruik EUR-genoteerde (UCITS) tickers zodat geen historische FX nodig is.
+BENCHMARKS = (
+    {"label": "MSCI World", "ticker": "IWDA.AS"},
+    {"label": "Nasdaq 100", "ticker": "EQQQ.DE"},
+)
+
 
 # Koppeltabel posities ↔ tags (many-to-many)
 positie_tags = db.Table(
@@ -141,3 +148,16 @@ class Aanbeveling(db.Model):
     instapkoers    = db.Column(db.Float, nullable=True)
     valuta         = db.Column(db.String(10), nullable=True)
     opgeslagen     = db.Column(db.DateTime, default=datetime.utcnow)
+
+
+class BenchmarkPunt(db.Model):
+    """Cache van dagelijkse EUR-slotkoersen per benchmark-ticker, voor de
+    deposit-matched vergelijking. Gevuld door fetch_benchmark.py."""
+    __tablename__ = "benchmark_punten"
+    id     = db.Column(db.Integer, primary_key=True)
+    ticker = db.Column(db.String(20), nullable=False, index=True)
+    datum  = db.Column(db.Date, nullable=False, index=True)
+    koers  = db.Column(db.Float, nullable=False)   # EUR-slotkoers
+    __table_args__ = (
+        db.UniqueConstraint("ticker", "datum", name="uq_benchmark_ticker_datum"),
+    )

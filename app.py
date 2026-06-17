@@ -1,3 +1,4 @@
+import bisect
 import json
 import os
 import re
@@ -21,10 +22,10 @@ from flask_wtf.csrf import CSRFProtect
 from markupsafe import Markup, escape
 from sqlalchemy import inspect as sa_inspect, text
 from sqlalchemy.orm import selectinload
-from helpers import naar_eur, xirr
-from models import (Advies, Aanbeveling, BrokerAccount, Gebruiker,
-                    NieuwsArtikel, Positie, Tag, Transactie,
-                    TRANSACTIE_TYPES, db)
+from helpers import naar_eur, xirr, benchmark_eindwaarde
+from models import (Advies, Aanbeveling, BenchmarkPunt, BENCHMARKS,
+                    BrokerAccount, Gebruiker, NieuwsArtikel, Positie, Tag,
+                    Transactie, TRANSACTIE_TYPES, db)
 from projectie import (cash_saldi, herbereken_alles, herbereken_positie,
                        na_transactie_wijziging)
 
@@ -260,6 +261,46 @@ def _externe_flows(account, wisselkoersen):
     return flows
 
 
+def _maak_prijs_op(ticker):
+    """Bouw een opzoekfunctie prijs_op(datum)→EUR-koers uit de benchmark-cache.
+    Geeft de meest recente koers op of vóór `datum`. Tweede returnwaarde geeft
+    aan of er überhaupt cache-data is."""
+    punten = (BenchmarkPunt.query.filter_by(ticker=ticker)
+              .order_by(BenchmarkPunt.datum).all())
+    datums  = [p.datum for p in punten]
+    koersen = [p.koers for p in punten]
+
+    def prijs_op(d):
+        i = bisect.bisect_right(datums, d) - 1
+        return koersen[i] if i >= 0 else None
+
+    return prijs_op, bool(punten)
+
+
+def _benchmark_vergelijkingen(grand_flows):
+    """Deposit-matched vergelijking: voor elke benchmark de eindwaarde en XIRR
+    als je dezelfde stortingen in die index had gedaan. Lege lijst als er geen
+    stortingen of geen cache-data zijn."""
+    if not grand_flows:
+        return []
+    vandaag = date.today()
+    resultaten = []
+    for bm in BENCHMARKS:
+        prijs_op, heeft_data = _maak_prijs_op(bm["ticker"])
+        if not heeft_data:
+            continue
+        eind, _ = benchmark_eindwaarde(grand_flows, prijs_op, vandaag)
+        if eind is None:
+            continue   # cache dekt niet alle flow-datums
+        resultaten.append({
+            "label": bm["label"],
+            "ticker": bm["ticker"],
+            "eind":  eind,
+            "xirr":  xirr(grand_flows + [(vandaag, eind)]),
+        })
+    return resultaten
+
+
 @app.route("/gebruiker/<int:gebruiker_id>")
 def dashboard(gebruiker_id):
     gebruiker = Gebruiker.query.get_or_404(gebruiker_id)
@@ -313,6 +354,7 @@ def dashboard(gebruiker_id):
 
     grand_eind = (grand_waarde if grand_has_prices else 0.0) + grand_cash_eur
     grand_xirr = xirr(grand_flows + [(date.today(), grand_eind)]) if grand_flows else None
+    benchmarks = _benchmark_vergelijkingen(grand_flows)
 
     return render_template(
         "dashboard.html",
@@ -325,7 +367,10 @@ def dashboard(gebruiker_id):
             "gerealiseerd": grand_gerealiseerd,
             "cash_eur":     grand_cash_eur,
             "xirr":         grand_xirr,
+            "eind":         grand_eind,
         },
+        benchmarks   = benchmarks,
+        heeft_flows  = bool(grand_flows),
         bijgewerkt   = bijgewerkt,
     )
 
@@ -860,6 +905,15 @@ def prijzen_verversen():
         "koersen",
         [sys.executable, str(BASE_DIR / "fetch_prices.py")],
         timeout=60, klaar_bericht="Koersen bijgewerkt.")
+    return {"taak_id": taak_id, "al_bezig": al_bezig}
+
+
+@app.route("/benchmark/verversen", methods=["POST"])
+def benchmark_verversen():
+    taak_id, al_bezig = _start_taak(
+        "benchmark",
+        [sys.executable, str(BASE_DIR / "fetch_benchmark.py")],
+        timeout=120, klaar_bericht="Benchmark-historie bijgewerkt.")
     return {"taak_id": taak_id, "al_bezig": al_bezig}
 
 
