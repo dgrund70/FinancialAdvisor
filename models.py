@@ -52,6 +52,7 @@ class Positie(db.Model):
     aankoopdatum       = db.Column(db.Date, nullable=True)
     koers_type         = db.Column(db.String(20), nullable=False, default="live")  # "live" of "handmatig"
     handmatige_koers   = db.Column(db.Float, nullable=True)
+    valuta             = db.Column(db.String(3), nullable=False, default="EUR")   # handelsvaluta GAK
     tags               = db.relationship(
         "Tag", secondary=positie_tags, backref="posities", lazy=True
     )

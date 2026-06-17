@@ -1,15 +1,23 @@
 import json
 import os
 import re
+import secrets
 import subprocess
 import sys
 from datetime import datetime, timedelta
 from pathlib import Path
 
+# Laad .env als die bestaat (optioneel — werkt ook zonder)
+try:
+    from dotenv import load_dotenv
+    load_dotenv(Path(__file__).parent / ".env")
+except ImportError:
+    pass
+
 from flask import Flask, flash, redirect, render_template, request, url_for
 from flask_wtf.csrf import CSRFProtect
 from markupsafe import Markup, escape
-from sqlalchemy import text
+from sqlalchemy import inspect as sa_inspect, text
 from helpers import naar_eur
 from models import (Advies, Aanbeveling, BrokerAccount, Gebruiker,
                     NieuwsArtikel, Positie, Tag, db)
@@ -38,8 +46,36 @@ try:
 except ImportError:
     pass
 
+def _laad_secret_key():
+    """Bepaal de Flask SECRET_KEY zonder ooit terug te vallen op een publiek
+    bekende default (die zou sessie- en CSRF-tokens vervalsbaar maken).
+
+    Volgorde: env-var SECRET_KEY > eerder gegenereerde sleutel in data/ >
+    nieuw gegenereerde willekeurige sleutel die lokaal wordt bewaard. Zo werkt
+    de app out-of-the-box, maar altijd met een unieke, geheime sleutel.
+    """
+    env_key = os.environ.get("SECRET_KEY")
+    if env_key:
+        return env_key
+
+    key_file = BASE_DIR / "data" / "secret_key"
+    if key_file.exists():
+        bestaande = key_file.read_text(encoding="utf-8").strip()
+        if bestaande:
+            return bestaande
+
+    key_file.parent.mkdir(exist_ok=True)
+    nieuwe_key = secrets.token_hex(32)
+    key_file.write_text(nieuwe_key, encoding="utf-8")
+    try:
+        os.chmod(key_file, 0o600)   # alleen leesbaar voor de eigenaar
+    except OSError:
+        pass
+    return nieuwe_key
+
+
 app = Flask(__name__)
-app.config["SECRET_KEY"] = os.environ.get("SECRET_KEY", "dev-secret-change-me")
+app.config["SECRET_KEY"] = _laad_secret_key()
 app.config["SQLALCHEMY_DATABASE_URI"] = f"sqlite:///{DB_PATH}"
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 
@@ -111,9 +147,19 @@ def bereken_posities(posities, koersen, wisselkoersen=None):
             waarde    = None
             dag_winst = 0.0
 
-        kosten    = pos.aantal * pos.aankoopprijs
+        # Handelsvaluta van de positie (EUR voor ETFs, USD voor US-aandelen)
+        pos_valuta = getattr(pos, "valuta", "EUR") or "EUR"
+
+        # Rendement % in native currency (USD vs USD, EUR vs EUR)
+        kosten_native  = pos.aantal * pos.aankoopprijs
+        waarde_native  = pos.aantal * koers if koers is not None else None
+        winst_native   = (waarde_native - kosten_native) if waarde_native is not None else None
+        winst_pct      = (winst_native / kosten_native * 100) if winst_native is not None and kosten_native else None
+
+        # Kosten en winst in EUR (voor portfolio-totalen en EUR W/V)
+        gak_eur   = naar_eur(pos.aankoopprijs, pos_valuta, wisselkoersen) or pos.aankoopprijs
+        kosten    = pos.aantal * gak_eur
         winst     = (waarde - kosten) if waarde is not None else None
-        winst_pct = (winst / kosten * 100) if winst is not None and kosten else None
 
         rows.append({
             "pos":       pos,
@@ -256,6 +302,7 @@ def _parse_positie_form(form):
     datum_str    = form.get("aankoopdatum", "").strip()
     koers_type   = form.get("koers_type", "live")
     hand_koers_s = form.get("handmatige_koers", "").strip()
+    valuta_val   = form.get("valuta", "EUR").strip().upper() or "EUR"
 
     fouten = []
     if not ticker_val:
@@ -292,6 +339,7 @@ def _parse_positie_form(form):
         "ticker": ticker_val, "naam": naam_val, "aantal": aantal_val,
         "aankoopprijs": prijs_val, "aankoopdatum": datum,
         "koers_type": koers_type, "handmatige_koers": hand_koers,
+        "valuta": valuta_val,
     }
     return waarden, fouten
 
@@ -369,6 +417,7 @@ def positie_bewerken(gebruiker_id, pos_id):
         "aankoopdatum":     pos.aankoopdatum.isoformat() if pos.aankoopdatum else "",
         "koers_type":       pos.koers_type,
         "handmatige_koers": pos.handmatige_koers if pos.handmatige_koers is not None else "",
+        "valuta":           getattr(pos, "valuta", "EUR") or "EUR",
     }
     return render_template("positie_form.html",
                            gebruiker=gebruiker, account=account, pos=pos,
@@ -674,9 +723,65 @@ def nieuws_verversen(gebruiker_id):
 
 # ── Database initialisatie ────────────────────────────────────────
 
+def _kolom_default_sql(kolom):
+    """Geef een SQL-literal voor de scalar default van een kolom, of None.
+
+    SQLite vereist een constante DEFAULT bij het toevoegen van een NOT NULL-kolom.
+    """
+    default = kolom.default
+    if default is None or not getattr(default, "is_scalar", False):
+        return None
+    waarde = default.arg
+    if isinstance(waarde, bool):
+        return "1" if waarde else "0"
+    if isinstance(waarde, (int, float)):
+        return str(waarde)
+    if isinstance(waarde, str):
+        return "'" + waarde.replace("'", "''") + "'"
+    return None
+
+
+def _sync_schema():
+    """Lichtgewicht additieve migratie: voeg kolommen toe die in de modellen
+    staan maar nog niet in een bestaande tabel.
+
+    Dit dekt de gangbare casus voor deze app — een nieuw veld op een bestaand
+    model (bijv. Positie.valuta) — zonder dat bestaande databases handmatig
+    gemigreerd hoeven te worden. SQLite kan kolommen niet wijzigen of
+    verwijderen; voor zulke veranderingen is nog steeds een handmatige migratie
+    nodig.
+    """
+    inspector = sa_inspect(db.engine)
+    bestaande_tabellen = set(inspector.get_table_names())
+
+    for tabel_naam, tabel in db.metadata.tables.items():
+        if tabel_naam not in bestaande_tabellen:
+            continue   # nieuwe tabel — create_all() heeft 'm net aangemaakt
+        bestaande_kolommen = {c["name"] for c in inspector.get_columns(tabel_naam)}
+        for kolom in tabel.columns:
+            if kolom.name in bestaande_kolommen:
+                continue
+            type_sql = kolom.type.compile(dialect=db.engine.dialect)
+            ddl = f'ALTER TABLE "{tabel_naam}" ADD COLUMN "{kolom.name}" {type_sql}'
+            default_sql = _kolom_default_sql(kolom)
+            if default_sql is not None:
+                ddl += f" DEFAULT {default_sql}"
+                if not kolom.nullable:
+                    ddl += " NOT NULL"
+            elif not kolom.nullable:
+                # Geen constante default beschikbaar: voeg toe als nullable zodat
+                # de migratie niet faalt op bestaande rijen. Waarschuw expliciet.
+                print(f"[migratie] WAARSCHUWING: {tabel_naam}.{kolom.name} is "
+                      f"NOT NULL zonder default — toegevoegd als nullable.")
+            db.session.execute(text(ddl))
+            print(f"[migratie] kolom toegevoegd: {tabel_naam}.{kolom.name}")
+    db.session.commit()
+
+
 def init_db():
     DB_PATH.parent.mkdir(exist_ok=True)
     db.create_all()
+    _sync_schema()
 
     if not Gebruiker.query.first():
         g = Gebruiker(naam="Mijn account")
@@ -690,4 +795,8 @@ with app.app_context():
     init_db()
 
 if __name__ == "__main__":
-    app.run(debug=True, port=5002)
+    # Debug staat standaard UIT: de Werkzeug-debugger voert willekeurige code uit
+    # bij een fout en mag nooit zomaar aanstaan. Zet FLASK_DEBUG=1 om 'm tijdens
+    # ontwikkeling aan te zetten. Expliciet aan 127.0.0.1 binden houdt de app lokaal.
+    debug = os.environ.get("FLASK_DEBUG", "").lower() in ("1", "true", "yes", "on")
+    app.run(host="127.0.0.1", port=5002, debug=debug)

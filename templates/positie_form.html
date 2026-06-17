@@ -55,11 +55,29 @@
                      value="{{ form_data.get('aantal', '') }}">
             </div>
             <div class="col-6">
-              <label for="aankoopprijs" class="form-label">Aankoopprijs (€)</label>
+              <label for="aankoopprijs" class="form-label">GAK (aankoopprijs)</label>
               <input type="number" class="form-control" id="aankoopprijs" name="aankoopprijs"
                      step="any" min="0.000001" placeholder="150.00" required
                      value="{{ form_data.get('aankoopprijs', '') }}">
             </div>
+          </div>
+
+          {# Valuta GAK #}
+          <div class="mb-3">
+            <label class="form-label">Valuta GAK</label>
+            <div class="d-flex gap-3">
+              <div class="form-check">
+                <input class="form-check-input" type="radio" name="valuta" id="val_eur" value="EUR"
+                       {{ 'checked' if form_data.get('valuta', 'EUR') == 'EUR' }}>
+                <label class="form-check-label" for="val_eur">EUR</label>
+              </div>
+              <div class="form-check">
+                <input class="form-check-input" type="radio" name="valuta" id="val_usd" value="USD"
+                       {{ 'checked' if form_data.get('valuta') == 'USD' }}>
+                <label class="form-check-label" for="val_usd">USD</label>
+              </div>
+            </div>
+            <div class="form-text">EUR voor Europese ETFs; USD voor Amerikaanse aandelen (CRSP, PLTR, etc.)</div>
           </div>
 
           {# Aankoopdatum #}
