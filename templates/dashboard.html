@@ -7,9 +7,10 @@
 {% macro eur(v) %}{% if v is not none %}€&nbsp;{{ "%.2f"|format(v) }}{% else %}—{% endif %}{% endmacro %}
 {% macro geld(v, valuta) %}{% if v is none %}—{% elif not valuta or valuta == 'EUR' %}€&nbsp;{{ "%.2f"|format(v) }}{% else %}{{ "%.2f"|format(v) }}&nbsp;{{ valuta }}{% endif %}{% endmacro %}
 {% macro pct(v) %}{{ teken(v) }}{{ "%.2f"|format(v) }}%{% endmacro %}
+{% macro xirr_fmt(r) %}{% if r is none %}—{% else %}{{ '+' if r > 0 else '' }}{{ "%.1f"|format(r * 100) }}%{% endif %}{% endmacro %}
 
 {# ── Samenvatting bovenaan ─────────────────────────────────────── #}
-<div class="row g-3 mb-4">
+<div class="row g-3 mb-3">
 
   <div class="col-12 col-sm-4">
     <div class="card h-100 border-0 shadow-sm">
@@ -34,10 +35,43 @@
   <div class="col-12 col-sm-4">
     <div class="card h-100 border-0 shadow-sm">
       <div class="card-body">
-        <p class="text-muted small mb-1"><i class="bi bi-bar-chart-line me-1"></i>Totaal rendement</p>
+        <p class="text-muted small mb-1"><i class="bi bi-bar-chart-line me-1"></i>Ongerealiseerd rendement</p>
         <h4 class="fw-bold mb-0 {{ kleur(totaal.winst) }}">
           {{ teken(totaal.winst) }}{{ eur(totaal.winst) }}
         </h4>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<div class="row g-3 mb-4">
+
+  <div class="col-12 col-sm-4">
+    <div class="card h-100 border-0 shadow-sm">
+      <div class="card-body">
+        <p class="text-muted small mb-1"><i class="bi bi-cash-stack me-1"></i>Gerealiseerd rendement</p>
+        <h4 class="fw-bold mb-0 {{ kleur(totaal.gerealiseerd) }}">
+          {{ teken(totaal.gerealiseerd) }}{{ eur(totaal.gerealiseerd) }}
+        </h4>
+      </div>
+    </div>
+  </div>
+
+  <div class="col-12 col-sm-4">
+    <div class="card h-100 border-0 shadow-sm">
+      <div class="card-body">
+        <p class="text-muted small mb-1"><i class="bi bi-cash-coin me-1"></i>Cash (totaal)</p>
+        <h4 class="fw-bold mb-0">{{ eur(totaal.cash_eur) }}</h4>
+      </div>
+    </div>
+  </div>
+
+  <div class="col-12 col-sm-4">
+    <div class="card h-100 border-0 shadow-sm">
+      <div class="card-body">
+        <p class="text-muted small mb-1"><i class="bi bi-graph-up-arrow me-1"></i>Rendement (XIRR)</p>
+        <h4 class="fw-bold mb-0 {{ kleur(totaal.xirr) }}">{{ xirr_fmt(totaal.xirr) }}</h4>
       </div>
     </div>
   </div>
@@ -84,6 +118,10 @@
     </h6>
     <div class="d-flex gap-2 align-items-center">
       <span class="text-muted small">{{ d.rows | length }} positie{{ 's' if d.rows | length != 1 }}</span>
+      <a href="{{ url_for('transactie_toevoegen', gebruiker_id=gebruiker.id, account_id=d.account.id) }}"
+         class="btn btn-outline-secondary btn-sm">
+        <i class="bi bi-journal-plus me-1"></i>Transactie
+      </a>
       <a href="{{ url_for('positie_toevoegen', gebruiker_id=gebruiker.id, account_id=d.account.id) }}"
          class="btn btn-outline-primary btn-sm">
         <i class="bi bi-plus-lg me-1"></i>Positie
@@ -113,6 +151,7 @@
           <th class="text-end">Waarde</th>
           <th class="text-end d-none d-sm-table-cell">Dag</th>
           <th class="text-end">Rendement</th>
+          <th class="text-end">Gerealiseerd</th>
           <th></th>
         </tr>
       </thead>
@@ -159,6 +198,9 @@
               <span class="opacity-75">{{ pct(r.winst_pct) }}</span>
             {% else %}<span class="text-muted">—</span>{% endif %}
           </td>
+          <td class="text-end small {{ kleur(r.gerealiseerd) if r.gerealiseerd else '' }}">
+            {% if r.gerealiseerd %}{{ teken(r.gerealiseerd) }}{{ geld(r.gerealiseerd, r.pos.valuta) }}{% else %}<span class="text-muted">—</span>{% endif %}
+          </td>
           <td class="text-end">
             <div class="d-inline-flex gap-2 align-items-center">
               <a href="{{ url_for('positie_bewerken', gebruiker_id=gebruiker.id, pos_id=r.pos.id) }}"
@@ -190,6 +232,9 @@
           <td class="text-end {{ kleur(d.winst) }}">
             {% if d.winst is not none %}{{ teken(d.winst) }}{{ eur(d.winst) }}{% else %}—{% endif %}
           </td>
+          <td class="text-end {{ kleur(d.gerealiseerd) }}">
+            {% if d.gerealiseerd %}{{ teken(d.gerealiseerd) }}{{ eur(d.gerealiseerd) }}{% else %}—{% endif %}
+          </td>
           <td></td>
         </tr>
       </tfoot>
@@ -197,12 +242,27 @@
   </div>
   {% else %}
   <div class="card-body text-muted small text-center py-3">
-    Geen posities —
-    <a href="{{ url_for('positie_toevoegen', gebruiker_id=gebruiker.id, account_id=d.account.id) }}">
-      voeg er een toe
-    </a>
+    Nog geen holdings —
+    <a href="{{ url_for('positie_toevoegen', gebruiker_id=gebruiker.id, account_id=d.account.id) }}">voeg een positie toe</a>
+    of <a href="{{ url_for('transactie_toevoegen', gebruiker_id=gebruiker.id, account_id=d.account.id) }}">boek een transactie</a>.
   </div>
   {% endif %}
+
+  {# Cash, gerealiseerd rendement en XIRR per account #}
+  <div class="card-footer bg-white d-flex justify-content-between align-items-center flex-wrap gap-3 small">
+    <span class="text-muted">
+      <i class="bi bi-cash-coin me-1"></i>Cash:
+      {% if d.cash %}{% for v, s in d.cash.items() %}<span class="fw-semibold ms-1">{{ geld(s, v) }}</span>{% endfor %}{% else %}—{% endif %}
+    </span>
+    <span>
+      {% if d.xirr is not none %}
+        <span class="text-muted">Rendement (XIRR):</span>
+        <span class="{{ kleur(d.xirr) }} fw-semibold">{{ xirr_fmt(d.xirr) }}</span>
+      {% endif %}
+      <a href="{{ url_for('transacties_overzicht', gebruiker_id=gebruiker.id, account_id=d.account.id) }}"
+         class="ms-3"><i class="bi bi-journals me-1"></i>Grootboek</a>
+    </span>
+  </div>
 </div>
 {% endfor %}
 

@@ -28,7 +28,7 @@
             <div class="position-relative">
               <input type="text" class="form-control text-uppercase" id="ticker" name="ticker"
                      placeholder="bijv. VWCE of Vanguard…" required autocomplete="off"
-                     value="{{ form_data.get('ticker', '') }}">
+                     value="{{ form_data.get('ticker', '') }}" {{ 'readonly' if pos }}>
               <div id="ticker-suggesties" class="list-group position-absolute w-100 shadow-sm"
                    style="z-index:1000; top:100%; display:none; max-height:16rem; overflow-y:auto;"></div>
             </div>
@@ -61,6 +61,16 @@
                      value="{{ form_data.get('aankoopprijs', '') }}">
             </div>
           </div>
+
+          {% if pos %}
+          <div class="alert alert-light border small py-2 mb-3">
+            <i class="bi bi-info-circle me-1"></i>Een gewijzigd aantal of GAK wordt vastgelegd als
+            <strong>correctie</strong> in het
+            <a href="{{ url_for('transacties_overzicht', gebruiker_id=gebruiker.id, account_id=account.id) }}">grootboek</a>.
+            Voor echte aankopen of verkopen kun je beter een
+            <a href="{{ url_for('transactie_toevoegen', gebruiker_id=gebruiker.id, account_id=account.id) }}">transactie</a> boeken.
+          </div>
+          {% endif %}
 
           {# Valuta GAK #}
           <div class="mb-3">

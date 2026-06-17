@@ -1,0 +1,116 @@
+{% extends "base.html" %}
+{% block content %}
+
+{% set is_edit = tx is not none %}
+{% set actie = url_for('transactie_bewerken', gebruiker_id=gebruiker.id, transactie_id=tx.id)
+               if is_edit
+               else url_for('transactie_toevoegen', gebruiker_id=gebruiker.id, account_id=account.id) %}
+
+<div class="d-flex align-items-center justify-content-between mb-4 flex-wrap gap-2">
+  <h5 class="mb-0 fw-semibold">
+    <i class="bi bi-journal-plus me-2 text-primary"></i>
+    {{ 'Transactie bewerken' if is_edit else 'Transactie toevoegen' }}
+    <span class="text-muted fw-normal">· {{ account.naam }}</span>
+  </h5>
+  <a href="{{ url_for('transacties_overzicht', gebruiker_id=gebruiker.id, account_id=account.id) }}"
+     class="btn btn-outline-secondary btn-sm">
+    <i class="bi bi-x-lg me-1"></i>Annuleren
+  </a>
+</div>
+
+<div class="card border-0 shadow-sm">
+  <div class="card-body">
+    <form method="post" action="{{ actie }}">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+      <div class="mb-3">
+        <label for="type" class="form-label">Type</label>
+        <select class="form-select" id="type" name="type">
+          {% for t in types %}
+          <option value="{{ t }}" {{ 'selected' if form_data.get('type') == t }}>{{ t|capitalize }}</option>
+          {% endfor %}
+        </select>
+      </div>
+
+      <div class="row g-3">
+        <div class="col-12 col-sm-6 tx-veld" data-types="koop verkoop dividend correctie">
+          <label for="ticker" class="form-label">Ticker</label>
+          <input type="text" class="form-control text-uppercase" id="ticker" name="ticker"
+                 placeholder="bijv. VWCE.AS" value="{{ form_data.get('ticker', '') }}">
+        </div>
+        <div class="col-6 col-sm-3 tx-veld" data-types="koop verkoop correctie">
+          <label for="aantal" class="form-label">Aantal</label>
+          <input type="number" step="any" min="0" class="form-control" id="aantal" name="aantal"
+                 value="{{ form_data.get('aantal', '') }}">
+        </div>
+        <div class="col-6 col-sm-3 tx-veld" data-types="koop verkoop correctie">
+          <label for="prijs" class="form-label">Prijs p/st</label>
+          <input type="number" step="any" min="0" class="form-control" id="prijs" name="prijs"
+                 value="{{ form_data.get('prijs', '') }}">
+        </div>
+        <div class="col-6 col-sm-4 tx-veld" data-types="storting opname dividend kosten">
+          <label for="bedrag" class="form-label">Bedrag</label>
+          <input type="number" step="any" min="0" class="form-control" id="bedrag" name="bedrag"
+                 value="{{ form_data.get('bedrag', '') }}">
+        </div>
+        <div class="col-6 col-sm-4 tx-veld" data-types="koop verkoop dividend">
+          <label for="kosten" class="form-label">Kosten</label>
+          <input type="number" step="any" min="0" class="form-control" id="kosten" name="kosten"
+                 value="{{ form_data.get('kosten', '') }}">
+        </div>
+        <div class="col-6 col-sm-4">
+          <label class="form-label">Valuta</label>
+          <div class="d-flex gap-3 pt-1">
+            <div class="form-check">
+              <input class="form-check-input" type="radio" name="valuta" id="v_eur" value="EUR"
+                     {{ 'checked' if form_data.get('valuta', 'EUR') == 'EUR' }}>
+              <label class="form-check-label" for="v_eur">EUR</label>
+            </div>
+            <div class="form-check">
+              <input class="form-check-input" type="radio" name="valuta" id="v_usd" value="USD"
+                     {{ 'checked' if form_data.get('valuta') == 'USD' }}>
+              <label class="form-check-label" for="v_usd">USD</label>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="row g-3 mt-0">
+        <div class="col-12 col-sm-4">
+          <label for="datum" class="form-label">Datum</label>
+          <input type="date" class="form-control" id="datum" name="datum"
+                 value="{{ form_data.get('datum') or vandaag }}">
+        </div>
+        <div class="col-12 col-sm-8">
+          <label for="notitie" class="form-label">Notitie <span class="text-muted">(optioneel)</span></label>
+          <input type="text" class="form-control" id="notitie" name="notitie" maxlength="200"
+                 value="{{ form_data.get('notitie', '') }}">
+        </div>
+      </div>
+
+      <div class="mt-4 d-flex gap-2">
+        <button type="submit" class="btn btn-primary">
+          <i class="bi bi-check-lg me-1"></i>{{ 'Opslaan' if is_edit else 'Toevoegen' }}
+        </button>
+      </div>
+    </form>
+  </div>
+</div>
+
+{# Toon alleen de velden die bij het gekozen type horen #}
+<script>
+(function () {
+  var typeSel = document.getElementById('type');
+  function ververs() {
+    var t = typeSel.value;
+    document.querySelectorAll('.tx-veld').forEach(function (el) {
+      var types = (el.getAttribute('data-types') || '').split(' ');
+      el.style.display = types.indexOf(t) !== -1 ? '' : 'none';
+    });
+  }
+  typeSel.addEventListener('change', ververs);
+  ververs();
+})();
+</script>
+
+{% endblock %}

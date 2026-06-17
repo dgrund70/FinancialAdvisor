@@ -49,7 +49,7 @@ def laad_portefeuille(gebruiker_id, tag_id=None):
             rows = conn.execute("""
                 SELECT po.ticker, po.naam, po.aantal, po.aankoopprijs,
                        po.aankoopdatum, ba.naam,
-                       po.koers_type, po.handmatige_koers
+                       po.koers_type, po.handmatige_koers, po.valuta
                 FROM posities po
                 JOIN broker_accounts ba ON po.broker_account_id = ba.id
                 JOIN positie_tags pt    ON pt.positie_id = po.id
@@ -60,7 +60,7 @@ def laad_portefeuille(gebruiker_id, tag_id=None):
             rows = conn.execute("""
                 SELECT po.ticker, po.naam, po.aantal, po.aankoopprijs,
                        po.aankoopdatum, ba.naam,
-                       po.koers_type, po.handmatige_koers
+                       po.koers_type, po.handmatige_koers, po.valuta
                 FROM posities po
                 JOIN broker_accounts ba ON po.broker_account_id = ba.id
                 WHERE ba.gebruiker_id = ?
@@ -166,7 +166,8 @@ def bouw_context(posities, koersen, wisselkoersen, macro, ticker_nieuws, tag_naa
     totaal_waarde = totaal_kosten = 0.0
     positie_regels = []
 
-    for ticker, naam, aantal, aankoopprijs, aankoopdatum, account_naam, koers_type, handmatige_koers in posities:
+    for ticker, naam, aantal, aankoopprijs, aankoopdatum, account_naam, koers_type, handmatige_koers, pos_valuta in posities:
+        pos_valuta = pos_valuta or "EUR"
         # Handmatige koers heeft voorrang
         if koers_type == "handmatig" and handmatige_koers:
             koers_eur = float(handmatige_koers)
@@ -176,8 +177,13 @@ def bouw_context(posities, koersen, wisselkoersen, macro, ticker_nieuws, tag_naa
             koers_eur = naar_eur(k.get("koers"), k.get("valuta", "EUR"), wisselkoersen)
             valuta    = k.get("valuta", "EUR")
 
+        # GAK omrekenen naar EUR via de handelsvaluta van de positie (USD-GAK
+        # mag niet als EUR worden behandeld).
+        gak_eur = naar_eur(aankoopprijs, pos_valuta, wisselkoersen)
+        if gak_eur is None:
+            gak_eur = aankoopprijs
         waarde = aantal * koers_eur if koers_eur is not None else None
-        kosten = aantal * aankoopprijs
+        kosten = aantal * gak_eur
 
         if waarde is not None:
             winst     = waarde - kosten
@@ -187,12 +193,12 @@ def bouw_context(posities, koersen, wisselkoersen, macro, ticker_nieuws, tag_naa
             label = "handmatig" if koers_type == "handmatig" else valuta
             positie_regels.append(
                 f"- **{ticker}** ({naam or ticker}) [{account_naam}]: "
-                f"{aantal} × €{aankoopprijs:.2f} → huidig €{waarde:.2f} ({winst_pct:+.1f}%) [{label}]"
+                f"{aantal} × €{gak_eur:.2f} → huidig €{waarde:.2f} ({winst_pct:+.1f}%) [{label}]"
             )
         else:
             positie_regels.append(
                 f"- **{ticker}** ({naam or ticker}) [{account_naam}]: "
-                f"{aantal} × €{aankoopprijs:.2f}  (koers onbekend)"
+                f"{aantal} × €{gak_eur:.2f}  (koers onbekend)"
             )
 
     titel = f"## Portefeuille{f' — tag: {tag_naam}' if tag_naam else ''}"

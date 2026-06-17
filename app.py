@@ -5,7 +5,7 @@ import secrets
 import subprocess
 import sys
 import threading
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from itertools import count
 from pathlib import Path
 
@@ -21,9 +21,12 @@ from flask_wtf.csrf import CSRFProtect
 from markupsafe import Markup, escape
 from sqlalchemy import inspect as sa_inspect, text
 from sqlalchemy.orm import selectinload
-from helpers import naar_eur
+from helpers import naar_eur, xirr
 from models import (Advies, Aanbeveling, BrokerAccount, Gebruiker,
-                    NieuwsArtikel, Positie, Tag, db)
+                    NieuwsArtikel, Positie, Tag, Transactie,
+                    TRANSACTIE_TYPES, db)
+from projectie import (cash_saldi, herbereken_alles, herbereken_positie,
+                       na_transactie_wijziging)
 
 try:
     import markdown as _md
@@ -125,13 +128,27 @@ def laad_prijzen():
 
 
 def bereken_posities(posities, koersen, wisselkoersen=None):
-    """Bereken marktwaarde, winst en dagverandering per positie."""
+    """Bereken marktwaarde, winst en dagverandering per positie.
+
+    Geeft (rows, totaal_waarde, totaal_kosten, totaal_dag, totaal_gerealiseerd)
+    terug. Gesloten posities (aantal 0) verschijnen niet in `rows`, maar hun
+    gerealiseerde winst telt wél mee in `totaal_gerealiseerd` (in EUR).
+    """
     wisselkoersen = wisselkoersen or {}
     rows = []
     totaal_waarde = totaal_kosten = totaal_dag = 0.0
+    totaal_gerealiseerd = 0.0
     has_prices = False
 
     for pos in posities:
+        pos_valuta_real = getattr(pos, "valuta", "EUR") or "EUR"
+        gereal = getattr(pos, "gerealiseerde_winst", 0.0) or 0.0
+        totaal_gerealiseerd += naar_eur(gereal, pos_valuta_real, wisselkoersen) or 0.0
+
+        # Gesloten positie (volledig verkocht): geen holding-rij tonen.
+        if abs(pos.aantal or 0.0) < 1e-9:
+            continue
+
         # Handmatige koers heeft voorrang boven live koers
         if pos.koers_type == "handmatig" and pos.handmatige_koers is not None:
             k      = {"koers": pos.handmatige_koers, "dag": 0.0, "dag_pct": 0.0, "valuta": "EUR"}
@@ -165,15 +182,16 @@ def bereken_posities(posities, koersen, wisselkoersen=None):
         winst     = (waarde - kosten) if waarde is not None else None
 
         rows.append({
-            "pos":       pos,
-            "koers":     koers,
-            "waarde":    waarde,
-            "kosten":    kosten,
-            "winst":     winst,
-            "winst_pct": winst_pct,
-            "dag_winst": dag_winst,
-            "dag_pct":   k.get("dag_pct", 0.0),
-            "valuta":    valuta,
+            "pos":         pos,
+            "koers":       koers,
+            "waarde":      waarde,
+            "kosten":      kosten,
+            "winst":       winst,
+            "winst_pct":   winst_pct,
+            "dag_winst":   dag_winst,
+            "dag_pct":     k.get("dag_pct", 0.0),
+            "valuta":      valuta,
+            "gerealiseerd": gereal,
         })
 
         if waarde is not None:
@@ -183,8 +201,8 @@ def bereken_posities(posities, koersen, wisselkoersen=None):
             totaal_dag    += dag_winst
 
     if not has_prices:
-        return rows, None, None, None
-    return rows, totaal_waarde, totaal_kosten, totaal_dag
+        return rows, None, None, None, totaal_gerealiseerd
+    return rows, totaal_waarde, totaal_kosten, totaal_dag, totaal_gerealiseerd
 
 
 # ── Gebruikersselectie ────────────────────────────────────────────
@@ -228,48 +246,85 @@ def gebruiker_verwijderen(gebruiker_id):
 
 # ── Dashboard ─────────────────────────────────────────────────────
 
+def _externe_flows(account, wisselkoersen):
+    """Externe cashflows (storting/opname) van een account, in EUR, voor XIRR.
+    Storting = negatief (geld de portefeuille in), opname = positief."""
+    flows = []
+    for tx in account.transacties:
+        if tx.type not in ("storting", "opname"):
+            continue
+        bedrag_eur = naar_eur(tx.bedrag or 0.0, tx.valuta or "EUR", wisselkoersen)
+        if bedrag_eur is None:
+            continue
+        flows.append((tx.datum, -bedrag_eur if tx.type == "storting" else bedrag_eur))
+    return flows
+
+
 @app.route("/gebruiker/<int:gebruiker_id>")
 def dashboard(gebruiker_id):
     gebruiker = Gebruiker.query.get_or_404(gebruiker_id)
     koersen, bijgewerkt, wisselkoersen = laad_prijzen()
 
-    # Eager-load accounts → posities → tags in enkele queries i.p.v. lazy
-    # loading per account/positie (voorkomt N+1 bij het renderen van het dashboard).
+    # Eager-load accounts → posities → tags (+ transacties) in enkele queries
+    # i.p.v. lazy loading per account/positie (voorkomt N+1 op het dashboard).
     accounts = (BrokerAccount.query
                 .filter_by(gebruiker_id=gebruiker_id)
                 .options(selectinload(BrokerAccount.posities)
-                         .selectinload(Positie.tags))
+                         .selectinload(Positie.tags),
+                         selectinload(BrokerAccount.transacties))
                 .order_by(BrokerAccount.id)
                 .all())
 
     account_data = []
     grand_waarde = grand_kosten = grand_dag = 0.0
+    grand_gerealiseerd = grand_cash_eur = 0.0
     grand_has_prices = False
+    grand_flows = []
 
     for account in accounts:
-        rows, tw, tk, td = bereken_posities(account.posities, koersen, wisselkoersen)
+        rows, tw, tk, td, tg = bereken_posities(account.posities, koersen, wisselkoersen)
         hp = tw is not None
+
+        cash      = cash_saldi(account.id)
+        cash_eur  = sum((naar_eur(s, v, wisselkoersen) or 0.0) for v, s in cash.items())
+        flows     = _externe_flows(account, wisselkoersen)
+        eind_eur  = (tw or 0.0) + cash_eur
+        acc_xirr  = xirr(flows + [(date.today(), eind_eur)]) if flows else None
+
         account_data.append({
-            "account": account,
-            "rows":    rows,
-            "waarde":  tw,
-            "dag":     td,
-            "winst":   (tw - tk) if hp else None,
+            "account":      account,
+            "rows":         rows,
+            "waarde":       tw,
+            "dag":          td,
+            "winst":        (tw - tk) if hp else None,
+            "gerealiseerd": tg,
+            "cash":         cash,
+            "cash_eur":     cash_eur,
+            "xirr":         acc_xirr,
         })
+        grand_gerealiseerd += tg
+        grand_cash_eur     += cash_eur
+        grand_flows        += flows
         if hp:
             grand_has_prices = True
             grand_waarde += tw
             grand_kosten += tk
             grand_dag    += td
 
+    grand_eind = (grand_waarde if grand_has_prices else 0.0) + grand_cash_eur
+    grand_xirr = xirr(grand_flows + [(date.today(), grand_eind)]) if grand_flows else None
+
     return render_template(
         "dashboard.html",
         gebruiker    = gebruiker,
         account_data = account_data,
         totaal       = {
-            "waarde": grand_waarde if grand_has_prices else None,
-            "winst":  (grand_waarde - grand_kosten) if grand_has_prices else None,
-            "dag":    grand_dag if grand_has_prices else None,
+            "waarde":       grand_waarde if grand_has_prices else None,
+            "winst":        (grand_waarde - grand_kosten) if grand_has_prices else None,
+            "dag":          grand_dag if grand_has_prices else None,
+            "gerealiseerd": grand_gerealiseerd,
+            "cash_eur":     grand_cash_eur,
+            "xirr":         grand_xirr,
         },
         bijgewerkt   = bijgewerkt,
     )
@@ -380,10 +435,27 @@ def positie_toevoegen(gebruiker_id, account_id):
 
         geselecteerde_tags = Tag.query.filter(Tag.id.in_(tag_ids),
                                               Tag.gebruiker_id == gebruiker_id).all()
-        pos = Positie(broker_account_id=account.id, tags=geselecteerde_tags, **waarden)
-        db.session.add(pos)
+        # Quick-add: leg de holding vast als eerste koop in het grootboek,
+        # projecteer naar een Positie en zet daarna de metadata erop.
+        db.session.add(Transactie(
+            broker_account_id=account.id, type="koop",
+            ticker=waarden["ticker"], aantal=waarden["aantal"],
+            prijs=waarden["aankoopprijs"], kosten=0.0,
+            valuta=waarden["valuta"],
+            datum=waarden["aankoopdatum"] or date.today(),
+            notitie="Eerste aankoop",
+        ))
+        db.session.flush()
+        pos = herbereken_positie(account.id, waarden["ticker"])
+        if pos is not None:
+            pos.naam             = waarden["naam"]
+            pos.koers_type       = waarden["koers_type"]
+            pos.handmatige_koers = waarden["handmatige_koers"]
+            pos.valuta           = waarden["valuta"]
+            pos.aankoopdatum     = waarden["aankoopdatum"] or pos.aankoopdatum
+            pos.tags             = geselecteerde_tags
         db.session.commit()
-        flash(f"{pos.ticker} toegevoegd aan {account.naam}.", "success")
+        flash(f"{waarden['ticker']} toegevoegd aan {account.naam}.", "success")
         return redirect(url_for("dashboard", gebruiker_id=gebruiker_id))
 
     return render_template("positie_form.html",
@@ -413,10 +485,31 @@ def positie_bewerken(gebruiker_id, pos_id):
                                    alle_tags=alle_tags, form_data=request.form,
                                    geselecteerde_tag_ids=tag_ids)
 
-        for veld, waarde in waarden.items():
-            setattr(pos, veld, waarde)
+        # Ticker is de identiteit van de holding en verandert niet via dit
+        # scherm; metadata is altijd bewerkbaar.
+        pos.naam             = waarden["naam"]
+        pos.koers_type       = waarden["koers_type"]
+        pos.handmatige_koers = waarden["handmatige_koers"]
+        pos.valuta           = waarden["valuta"]
+        if waarden["aankoopdatum"]:
+            pos.aankoopdatum = waarden["aankoopdatum"]
         pos.tags = Tag.query.filter(Tag.id.in_(tag_ids),
                                     Tag.gebruiker_id == gebruiker_id).all()
+
+        # Direct gewijzigd(e) aantal/GAK → vastleggen als correctie-transactie en
+        # opnieuw projecteren, zodat de cache nooit buiten het grootboek om wijzigt.
+        aantal_gewijzigd = abs((pos.aantal or 0.0) - (waarden["aantal"] or 0.0)) > 1e-9
+        gak_gewijzigd    = abs((pos.aankoopprijs or 0.0) - (waarden["aankoopprijs"] or 0.0)) > 1e-9
+        if aantal_gewijzigd or gak_gewijzigd:
+            db.session.add(Transactie(
+                broker_account_id=account.id, type="correctie",
+                ticker=pos.ticker, aantal=waarden["aantal"],
+                prijs=waarden["aankoopprijs"], kosten=0.0,
+                valuta=waarden["valuta"], datum=date.today(),
+                notitie="Handmatige correctie",
+            ))
+            db.session.flush()
+            herbereken_positie(account.id, pos.ticker)
         db.session.commit()
         flash(f"{pos.ticker} bijgewerkt.", "success")
         return redirect(url_for("dashboard", gebruiker_id=gebruiker_id))
@@ -444,6 +537,10 @@ def positie_verwijderen(gebruiker_id, pos_id):
         flash("Niet geautoriseerd.", "danger")
         return redirect(url_for("dashboard", gebruiker_id=gebruiker_id))
     ticker = pos.ticker
+    account_id = pos.broker_account_id
+    # Verwijder ook de grootboektransacties voor deze ticker, anders her-creëert
+    # de projectie de holding. Cash-transacties (zonder ticker) blijven ongemoeid.
+    Transactie.query.filter_by(broker_account_id=account_id, ticker=ticker).delete()
     db.session.delete(pos)
     db.session.commit()
     flash(f"{ticker} verwijderd.", "info")
@@ -471,6 +568,201 @@ def positie_tags_bewerken(gebruiker_id, pos_id):
 
     return render_template("positie_tags.html",
                            gebruiker=gebruiker, pos=pos, alle_tags=alle_tags)
+
+
+# ── Transacties (grootboek) ───────────────────────────────────────
+
+def _parse_transactie_form(form, account, enforce_verkoop=True):
+    """Valideer het transactie-formulier. Geeft (waarden, fouten) terug."""
+    def _getal(naam):
+        s = form.get(naam, "").strip()
+        return float(s) if s else None   # kan ValueError gooien
+
+    fouten      = []
+    type_val    = form.get("type", "").strip()
+    ticker_val  = form.get("ticker", "").strip().upper()
+    valuta_val  = form.get("valuta", "EUR").strip().upper() or "EUR"
+    datum_str   = form.get("datum", "").strip()
+    notitie_val = form.get("notitie", "").strip()[:200]
+
+    if type_val not in TRANSACTIE_TYPES:
+        fouten.append("Ongeldig transactietype.")
+
+    try:
+        datum = datetime.strptime(datum_str, "%Y-%m-%d").date() if datum_str else None
+    except ValueError:
+        datum = None
+    if datum is None:
+        fouten.append("Geldige datum is verplicht.")
+
+    kosten = 0.0
+    try:
+        kosten = _getal("kosten") or 0.0
+    except ValueError:
+        fouten.append("Kosten moeten een getal zijn.")
+
+    aantal = prijs = bedrag = None
+    is_aandeel = type_val in ("koop", "verkoop")
+    if type_val in ("koop", "verkoop", "dividend") and not ticker_val:
+        fouten.append("Ticker is verplicht voor dit type.")
+    if is_aandeel:
+        try:
+            aantal = _getal("aantal")
+            if not aantal or aantal <= 0:
+                fouten.append("Aantal moet groter dan 0 zijn.")
+        except ValueError:
+            fouten.append("Aantal moet een getal zijn.")
+        try:
+            prijs = _getal("prijs")
+            if not prijs or prijs <= 0:
+                fouten.append("Prijs moet groter dan 0 zijn.")
+        except ValueError:
+            fouten.append("Prijs moet een getal zijn.")
+    if type_val in ("storting", "opname", "dividend", "kosten"):
+        try:
+            bedrag = _getal("bedrag")
+            if not bedrag or bedrag <= 0:
+                fouten.append("Bedrag moet groter dan 0 zijn.")
+        except ValueError:
+            fouten.append("Bedrag moet een getal zijn.")
+
+    # Niet meer verkopen dan in bezit (alleen bij toevoegen; bij bewerken is de
+    # huidige projectie lastig te corrigeren voor de transactie zelf).
+    if enforce_verkoop and type_val == "verkoop" and ticker_val and aantal:
+        pos = Positie.query.filter_by(broker_account_id=account.id, ticker=ticker_val).first()
+        beschikbaar = (pos.aantal if pos else 0.0) or 0.0
+        if aantal > beschikbaar + 1e-9:
+            fouten.append(f"Niet genoeg stuks om te verkopen (max {beschikbaar:g}).")
+
+    waarden = {
+        "type": type_val, "ticker": ticker_val or None,
+        "aantal": aantal, "prijs": prijs, "bedrag": bedrag,
+        "kosten": kosten, "valuta": valuta_val, "datum": datum,
+        "notitie": notitie_val or None,
+    }
+    if type_val in ("storting", "opname", "kosten"):
+        waarden["ticker"] = None   # cash-types dragen geen ticker
+    return waarden, fouten
+
+
+def _autoriseer_account(account, gebruiker_id):
+    """True als het account bij de gebruiker hoort; anders flash + False."""
+    if account.gebruiker_id != gebruiker_id:
+        flash("Niet geautoriseerd.", "danger")
+        return False
+    return True
+
+
+@app.route("/gebruiker/<int:gebruiker_id>/account/<int:account_id>/transacties")
+def transacties_overzicht(gebruiker_id, account_id):
+    gebruiker = Gebruiker.query.get_or_404(gebruiker_id)
+    account   = BrokerAccount.query.get_or_404(account_id)
+    if not _autoriseer_account(account, gebruiker_id):
+        return redirect(url_for("dashboard", gebruiker_id=gebruiker_id))
+
+    q = Transactie.query.filter_by(broker_account_id=account.id)
+    ticker_filter = request.args.get("ticker", "").strip().upper()
+    if ticker_filter:
+        q = q.filter_by(ticker=ticker_filter)
+    transacties = q.order_by(Transactie.datum.desc(), Transactie.id.desc()).all()
+
+    return render_template("transacties.html",
+                           gebruiker=gebruiker, account=account,
+                           transacties=transacties, cash=cash_saldi(account.id),
+                           ticker_filter=ticker_filter, types=TRANSACTIE_TYPES)
+
+
+@app.route("/gebruiker/<int:gebruiker_id>/account/<int:account_id>/transactie/toevoegen",
+           methods=["GET", "POST"])
+def transactie_toevoegen(gebruiker_id, account_id):
+    gebruiker = Gebruiker.query.get_or_404(gebruiker_id)
+    account   = BrokerAccount.query.get_or_404(account_id)
+    if not _autoriseer_account(account, gebruiker_id):
+        return redirect(url_for("dashboard", gebruiker_id=gebruiker_id))
+
+    if request.method == "POST":
+        waarden, fouten = _parse_transactie_form(request.form, account)
+        if fouten:
+            for f in fouten:
+                flash(f, "danger")
+            return render_template("transactie_form.html", gebruiker=gebruiker,
+                                   account=account, tx=None, types=TRANSACTIE_TYPES,
+                                   form_data=request.form, vandaag=date.today().isoformat())
+        db.session.add(Transactie(broker_account_id=account.id, **waarden))
+        db.session.flush()
+        na_transactie_wijziging(account.id, waarden["ticker"])
+        db.session.commit()
+        flash("Transactie toegevoegd.", "success")
+        return redirect(url_for("transacties_overzicht",
+                                gebruiker_id=gebruiker_id, account_id=account.id))
+
+    return render_template("transactie_form.html", gebruiker=gebruiker,
+                           account=account, tx=None, types=TRANSACTIE_TYPES,
+                           form_data={}, vandaag=date.today().isoformat())
+
+
+@app.route("/gebruiker/<int:gebruiker_id>/transactie/<int:transactie_id>/bewerken",
+           methods=["GET", "POST"])
+def transactie_bewerken(gebruiker_id, transactie_id):
+    gebruiker = Gebruiker.query.get_or_404(gebruiker_id)
+    tx        = Transactie.query.get_or_404(transactie_id)
+    account   = tx.broker_account
+    if not _autoriseer_account(account, gebruiker_id):
+        return redirect(url_for("dashboard", gebruiker_id=gebruiker_id))
+
+    if request.method == "POST":
+        oude_ticker = tx.ticker
+        waarden, fouten = _parse_transactie_form(request.form, account,
+                                                 enforce_verkoop=False)
+        if fouten:
+            for f in fouten:
+                flash(f, "danger")
+            return render_template("transactie_form.html", gebruiker=gebruiker,
+                                   account=account, tx=tx, types=TRANSACTIE_TYPES,
+                                   form_data=request.form, vandaag=date.today().isoformat())
+        for veld, waarde in waarden.items():
+            setattr(tx, veld, waarde)
+        db.session.flush()
+        na_transactie_wijziging(account.id, oude_ticker, waarden["ticker"])
+        db.session.commit()
+        flash("Transactie bijgewerkt.", "success")
+        return redirect(url_for("transacties_overzicht",
+                                gebruiker_id=gebruiker_id, account_id=account.id))
+
+    form_data = {
+        "type": tx.type, "ticker": tx.ticker or "", "aantal": tx.aantal,
+        "prijs": tx.prijs, "bedrag": tx.bedrag, "kosten": tx.kosten,
+        "valuta": tx.valuta, "datum": tx.datum.isoformat() if tx.datum else "",
+        "notitie": tx.notitie or "",
+    }
+    return render_template("transactie_form.html", gebruiker=gebruiker,
+                           account=account, tx=tx, types=TRANSACTIE_TYPES,
+                           form_data=form_data, vandaag=date.today().isoformat())
+
+
+@app.route("/gebruiker/<int:gebruiker_id>/transactie/<int:transactie_id>/verwijderen",
+           methods=["POST"])
+def transactie_verwijderen(gebruiker_id, transactie_id):
+    tx      = Transactie.query.get_or_404(transactie_id)
+    account = tx.broker_account
+    if not _autoriseer_account(account, gebruiker_id):
+        return redirect(url_for("dashboard", gebruiker_id=gebruiker_id))
+    account_id, ticker = account.id, tx.ticker
+    db.session.delete(tx)
+    db.session.flush()
+    na_transactie_wijziging(account_id, ticker)
+    db.session.commit()
+    flash("Transactie verwijderd.", "info")
+    return redirect(url_for("transacties_overzicht",
+                            gebruiker_id=gebruiker_id, account_id=account_id))
+
+
+@app.route("/gebruiker/<int:gebruiker_id>/herbereken", methods=["POST"])
+def herbereken(gebruiker_id):
+    Gebruiker.query.get_or_404(gebruiker_id)
+    herbereken_alles()
+    flash("Holdings opnieuw berekend uit het grootboek.", "success")
+    return redirect(url_for("dashboard", gebruiker_id=gebruiker_id))
 
 
 # ── Tags ──────────────────────────────────────────────────────────
@@ -828,6 +1120,51 @@ def _sync_schema():
     db.session.commit()
 
 
+def _backfill_transacties():
+    """Eenmalige migratie: zet bestaande (handmatig ingevoerde) posities om naar
+    een opening-koop in het grootboek, zodat holdings voortaan afgeleid worden.
+
+    Idempotent: draait alleen als er nog géén transacties zijn. (Wie later álle
+    transacties handmatig wist, zou bij herstart opnieuw geseed worden — voor een
+    lokale single-user app acceptabel.)
+    """
+    if Transactie.query.first() is not None:
+        return
+    posities = Positie.query.all()
+    if not posities:
+        return
+
+    for pos in posities:
+        if (pos.aantal or 0.0) <= 0:
+            continue
+        db.session.add(Transactie(
+            broker_account_id=pos.broker_account_id, type="koop",
+            ticker=pos.ticker, aantal=pos.aantal, prijs=pos.aankoopprijs,
+            kosten=0.0, valuta=pos.valuta or "EUR",
+            datum=pos.aankoopdatum or date(2020, 1, 1),
+            notitie="Openingssaldo (automatisch)",
+        ))
+    db.session.flush()
+
+    # Dubbele posities per (account, ticker) samenvoegen: laagste id blijft,
+    # tags worden geünioneerd, de rest verwijderd; daarna herprojecteren tot één
+    # holding met gewogen-gemiddelde GAK over de opening-koops.
+    groepen = {}
+    for pos in Positie.query.order_by(Positie.id).all():
+        groepen.setdefault((pos.broker_account_id, pos.ticker), []).append(pos)
+    for (account_id, ticker), groep in groepen.items():
+        survivor = groep[0]
+        for dubbel in groep[1:]:
+            for tag in dubbel.tags:
+                if tag not in survivor.tags:
+                    survivor.tags.append(tag)
+            db.session.delete(dubbel)
+        db.session.flush()
+        herbereken_positie(account_id, ticker)
+    db.session.commit()
+    print(f"[migratie] grootboek-backfill voltooid ({len(posities)} posities verwerkt).")
+
+
 def init_db():
     DB_PATH.parent.mkdir(exist_ok=True)
     db.create_all()
@@ -839,6 +1176,8 @@ def init_db():
         db.session.flush()
         db.session.add(BrokerAccount(naam="Mijn portefeuille", gebruiker_id=g.id))
         db.session.commit()
+
+    _backfill_transacties()
 
 
 with app.app_context():

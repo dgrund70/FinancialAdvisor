@@ -3,6 +3,12 @@ from flask_sqlalchemy import SQLAlchemy
 
 db = SQLAlchemy()
 
+# Toegestane transactietypes. koop/verkoop/dividend hebben een ticker;
+# storting/opname/kosten zijn puur cash; correctie her-baselined een holding
+# (handmatige aanpassing van aantal/GAK) zonder cash-effect.
+TRANSACTIE_TYPES = ("koop", "verkoop", "dividend",
+                    "storting", "opname", "kosten", "correctie")
+
 
 # Koppeltabel posities ↔ tags (many-to-many)
 positie_tags = db.Table(
@@ -39,6 +45,10 @@ class BrokerAccount(db.Model):
         "Positie", backref="broker_account",
         cascade="all, delete-orphan", lazy=True
     )
+    transacties    = db.relationship(
+        "Transactie", backref="broker_account",
+        cascade="all, delete-orphan", lazy=True
+    )
 
 
 class Positie(db.Model):
@@ -53,9 +63,38 @@ class Positie(db.Model):
     koers_type         = db.Column(db.String(20), nullable=False, default="live")  # "live" of "handmatig"
     handmatige_koers   = db.Column(db.Float, nullable=True)
     valuta             = db.Column(db.String(3), nullable=False, default="EUR")   # handelsvaluta GAK
+    gerealiseerde_winst = db.Column(db.Float, nullable=False, default=0.0)        # cumulatief, in handelsvaluta
     tags               = db.relationship(
         "Tag", secondary=positie_tags, backref="posities", lazy=True
     )
+
+
+class Transactie(db.Model):
+    """Grootboek: holdings (Positie) worden hieruit afgeleid via projectie.py.
+
+    Cash-tekenconventie t.o.v. het accountsaldo:
+      storting   : +bedrag
+      opname     : -bedrag
+      koop       : -(aantal*prijs + kosten)
+      verkoop    : +(aantal*prijs - kosten)
+      dividend   : +(bedrag - kosten)
+      kosten     : -bedrag
+      correctie  :  0   (alleen her-baseline van aantal/GAK, geen cash-effect)
+    """
+    __tablename__     = "transacties"
+    id                = db.Column(db.Integer, primary_key=True)
+    broker_account_id = db.Column(db.Integer, db.ForeignKey("broker_accounts.id"),
+                                  nullable=False, index=True)
+    type              = db.Column(db.String(20), nullable=False)   # zie TRANSACTIE_TYPES
+    ticker            = db.Column(db.String(20), nullable=True)    # vereist voor koop/verkoop/dividend
+    aantal            = db.Column(db.Float, nullable=True)         # stuks (koop/verkoop/correctie)
+    prijs             = db.Column(db.Float, nullable=True)         # per stuk in `valuta` (koop/verkoop/correctie)
+    bedrag            = db.Column(db.Float, nullable=True)         # cash-bedrag (storting/opname/dividend/kosten)
+    kosten            = db.Column(db.Float, nullable=False, default=0.0)   # courtage/kosten in `valuta`
+    valuta            = db.Column(db.String(3), nullable=False, default="EUR")
+    datum             = db.Column(db.Date, nullable=False, index=True)
+    notitie           = db.Column(db.String(200), nullable=True)
+    aangemaakt        = db.Column(db.DateTime, default=datetime.utcnow)
 
 
 class Tag(db.Model):
