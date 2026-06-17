@@ -1117,6 +1117,15 @@ def nieuws_verversen(gebruiker_id):
     return {"taak_id": taak_id, "al_bezig": al_bezig}
 
 
+@app.route("/gebruiker/<int:gebruiker_id>/fundamentals/verversen", methods=["POST"])
+def fundamentals_verversen(gebruiker_id):
+    taak_id, al_bezig = _start_taak(
+        "fundamentals",
+        [sys.executable, str(BASE_DIR / "fetch_fundamentals.py")],
+        timeout=120, klaar_bericht="Fundamentals bijgewerkt.")
+    return {"taak_id": taak_id, "al_bezig": al_bezig}
+
+
 # ── Database initialisatie ────────────────────────────────────────
 
 def _kolom_default_sql(kolom):

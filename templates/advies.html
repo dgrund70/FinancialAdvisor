@@ -35,6 +35,12 @@
         <i class="bi bi-newspaper me-1"></i>Ververs nieuws
       </button>
     </form>
+    <form method="post" action="{{ url_for('fundamentals_verversen', gebruiker_id=gebruiker.id) }}" data-taak>
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <button class="btn btn-outline-secondary btn-sm">
+        <i class="bi bi-bar-chart-line me-1"></i>Ververs fundamentals
+      </button>
+    </form>
     <form method="post" action="{{ url_for('advies_genereer', gebruiker_id=gebruiker.id) }}" data-taak>
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
       <button class="btn btn-primary btn-sm" {{ 'disabled' if not heeft_api_key }}>

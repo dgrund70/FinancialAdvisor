@@ -154,19 +154,94 @@ def laad_nieuws(tickers=None, max_per_ticker=6):
     return ticker_nieuws
 
 
+_FUNDAMENTAL_KOLOMMEN = [
+    "ticker", "naam", "sector", "markt_kap", "pe", "forward_pe",
+    "koers_boekwaarde", "dividend_rendement", "winstmarge", "omzetgroei",
+    "winstgroei", "rendement_ev", "schuld_ev", "koersdoel", "aanbeveling", "valuta",
+]
+
+
+def laad_fundamentals(tickers=None):
+    """Laad gecachte fundamentals uit de DB als {ticker: {kolom: waarde}}."""
+    conn = sqlite3.connect(DB_PATH, timeout=10)
+    res = {}
+    try:
+        try:
+            rows = conn.execute(
+                f"SELECT {', '.join(_FUNDAMENTAL_KOLOMMEN)} FROM fundamentals"
+            ).fetchall()
+        except sqlite3.OperationalError:
+            return {}   # tabel bestaat nog niet
+        for row in rows:
+            d = dict(zip(_FUNDAMENTAL_KOLOMMEN, row))
+            if tickers and d["ticker"] not in tickers:
+                continue
+            res[d["ticker"]] = d
+    finally:
+        conn.close()
+    return res
+
+
+def _kort_bedrag(n):
+    for grens, suffix in ((1e12, "T"), (1e9, "mld"), (1e6, "mln")):
+        if abs(n) >= grens:
+            return f"{n / grens:.1f}{suffix}"
+    return f"{n:.0f}"
+
+
+def _pct(v):
+    return f"{v * 100:.1f}%"
+
+
+def _format_fundamental(ticker, f):
+    """Compacte één-regel-samenvatting van de fundamentals, of None als leeg."""
+    delen = []
+    if f.get("sector"):
+        delen.append(str(f["sector"]))
+    if f.get("markt_kap"):
+        delen.append(f"mkt cap {_kort_bedrag(f['markt_kap'])}")
+    if f.get("pe") is not None:
+        delen.append(f"K/W {f['pe']:.1f}")
+    if f.get("forward_pe") is not None:
+        delen.append(f"fwd K/W {f['forward_pe']:.1f}")
+    if f.get("koers_boekwaarde") is not None:
+        delen.append(f"K/B {f['koers_boekwaarde']:.1f}")
+    if f.get("dividend_rendement"):
+        delen.append(f"div {_pct(f['dividend_rendement'])}")
+    if f.get("winstmarge") is not None:
+        delen.append(f"marge {_pct(f['winstmarge'])}")
+    if f.get("omzetgroei") is not None:
+        delen.append(f"omzetgroei {_pct(f['omzetgroei'])}")
+    if f.get("winstgroei") is not None:
+        delen.append(f"winstgroei {_pct(f['winstgroei'])}")
+    if f.get("rendement_ev") is not None:
+        delen.append(f"ROE {_pct(f['rendement_ev'])}")
+    if f.get("koersdoel") is not None:
+        delen.append(f"koersdoel {f['koersdoel']:.2f}")
+    if f.get("aanbeveling"):
+        delen.append(f"analisten: {f['aanbeveling']}")
+    if not delen:
+        return None
+    return f"- **{ticker}**: " + " · ".join(delen)
+
+
 # ── Prompt bouwen ─────────────────────────────────────────────────
 
-def bouw_context(posities, koersen, wisselkoersen, macro, ticker_nieuws, tag_naam=None):
+def bouw_context(posities, koersen, wisselkoersen, macro, ticker_nieuws,
+                 fundamentals=None, tag_naam=None):
     """
     Bouw de context-string voor de prompt.
     posities = lijst van (ticker, naam, aantal, aankoopprijs, aankoopdatum,
-                          account_naam, koers_type, handmatige_koers)
+                          account_naam, koers_type, handmatige_koers, valuta)
+    fundamentals = {ticker: {kolom: waarde}} (optioneel)
     """
     regels = []
+    positie_tickers = []
     totaal_waarde = totaal_kosten = 0.0
     positie_regels = []
 
     for ticker, naam, aantal, aankoopprijs, aankoopdatum, account_naam, koers_type, handmatige_koers, pos_valuta in posities:
+        positie_tickers.append(ticker)
         pos_valuta = pos_valuta or "EUR"
         # Handmatige koers heeft voorrang
         if koers_type == "handmatig" and handmatige_koers:
@@ -210,6 +285,18 @@ def bouw_context(posities, koersen, wisselkoersen, macro, ticker_nieuws, tag_naa
             f"Rendement: €{totaal_winst:+.2f} ({totaal_winst/totaal_kosten*100:+.1f}%)"
         )
     regels.extend(positie_regels)
+
+    if fundamentals:
+        fund_regels = []
+        for ticker in dict.fromkeys(positie_tickers):   # behoud volgorde, dedup
+            f = fundamentals.get(ticker)
+            if f:
+                regel = _format_fundamental(ticker, f)
+                if regel:
+                    fund_regels.append(regel)
+        if fund_regels:
+            regels.append("\n## Fundamentals per positie (bron: yfinance)")
+            regels.extend(fund_regels)
 
     if macro:
         regels.append("\n## Macro-omgeving")
@@ -255,11 +342,14 @@ def bouw_prompt(context, tag_naam=None):
         "## Samenvatting\n"
         "2–3 zinnen met de kern van de situatie én de belangrijkste actie.\n\n"
         "## Huidige posities\n"
-        "Per positie: houden / bijkopen / verkopen / reduceren, met concrete motivatie "
-        "op basis van nieuws en macro.\n\n"
+        "Per positie: houden / bijkopen / verkopen / reduceren, met concrete motivatie. "
+        "Onderbouw met de fundamentals (waardering zoals K/W en K/B, groei, marges, ROE, "
+        "analisten-koersdoel) waar beschikbaar, plus nieuws en macro. Verwijs naar de "
+        "concrete cijfers; verzin geen getallen die niet in de context staan.\n\n"
         "## Nieuwe kansen\n"
-        "3–5 concrete nieuwe posities of sectoren die nu interessant zijn. "
-        "Geef per suggestie: ticker, waarom nu, en hoe het de portefeuille aanvult.\n\n"
+        "3–5 concrete nieuwe posities of sectoren die nu interessant zijn. Geef per suggestie: "
+        "ticker, waarom nu (onderbouw met waardering/groei waar je die kent), en hoe het de "
+        "portefeuille aanvult.\n\n"
         "## Risico's\n"
         "Concrete risico's voor deze specifieke portefeuille.\n\n"
         "## Macro & Geopolitiek\n"
@@ -345,8 +435,12 @@ def genereer(gebruiker_id, tag_id=None):
     n_ticker = sum(len(v) for v in ticker_nieuws.values())
     print(f"  {n_ticker} artikelen voor {len(relevante_tickers)} tickers")
 
+    fundamentals = laad_fundamentals(tickers=relevante_tickers)
+    print(f"  fundamentals beschikbaar voor {len(fundamentals)} tickers")
+
     context, totaal_waarde, totaal_kosten = bouw_context(
-        posities, koersen, wisselkoersen, macro, ticker_nieuws, tag_naam
+        posities, koersen, wisselkoersen, macro, ticker_nieuws,
+        fundamentals=fundamentals, tag_naam=tag_naam
     )
 
     snapshot = json.dumps({

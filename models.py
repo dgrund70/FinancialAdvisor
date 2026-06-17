@@ -161,3 +161,28 @@ class BenchmarkPunt(db.Model):
     __table_args__ = (
         db.UniqueConstraint("ticker", "datum", name="uq_benchmark_ticker_datum"),
     )
+
+
+class Fundamental(db.Model):
+    """Cache van fundamentals per ticker (bron: yfinance), als context voor de
+    adviesmodule. Gevuld door fetch_fundamentals.py. Alle cijfers nullable —
+    yfinance levert niet voor elke ticker hetzelfde."""
+    __tablename__      = "fundamentals"
+    id                 = db.Column(db.Integer, primary_key=True)
+    ticker             = db.Column(db.String(20), nullable=False, unique=True, index=True)
+    naam               = db.Column(db.String(120), nullable=True)
+    sector             = db.Column(db.String(80), nullable=True)
+    markt_kap          = db.Column(db.Float, nullable=True)   # marketCap
+    pe                 = db.Column(db.Float, nullable=True)   # trailingPE
+    forward_pe         = db.Column(db.Float, nullable=True)   # forwardPE
+    koers_boekwaarde   = db.Column(db.Float, nullable=True)   # priceToBook
+    dividend_rendement = db.Column(db.Float, nullable=True)   # dividendYield
+    winstmarge         = db.Column(db.Float, nullable=True)   # profitMargins (fractie)
+    omzetgroei         = db.Column(db.Float, nullable=True)   # revenueGrowth (fractie)
+    winstgroei         = db.Column(db.Float, nullable=True)   # earningsGrowth (fractie)
+    rendement_ev       = db.Column(db.Float, nullable=True)   # returnOnEquity (fractie)
+    schuld_ev          = db.Column(db.Float, nullable=True)   # debtToEquity
+    koersdoel          = db.Column(db.Float, nullable=True)   # targetMeanPrice
+    aanbeveling        = db.Column(db.String(30), nullable=True)  # recommendationKey
+    valuta             = db.Column(db.String(10), nullable=True)
+    opgehaald          = db.Column(db.DateTime, default=datetime.utcnow)
