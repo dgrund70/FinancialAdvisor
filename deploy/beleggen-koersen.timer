@@ -1,0 +1,11 @@
+[Unit]
+Description=Beleggingsdashboard — koersen elke 15 minuten
+
+[Timer]
+# Elke 15 minuten (00, 15, 30, 45). Draait dag en nacht; onschadelijk buiten beurstijd.
+OnCalendar=*:0/15
+# Mis-een-slag inhalen na uitstaan/herstart van de Pi:
+Persistent=true
+
+[Install]
+WantedBy=timers.target

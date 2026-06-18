@@ -1,0 +1,13 @@
+[Unit]
+Description=Beleggingsdashboard — koersen ophalen (eenmalig, via timer)
+
+[Service]
+Type=oneshot
+User=pi
+WorkingDirectory=/home/pi/Investeren-en-beleggen
+EnvironmentFile=-/home/pi/Investeren-en-beleggen/.env
+# "Beleefd" t.o.v. andere processen (zoals Nightwatch): lage CPU-/IO-prioriteit.
+Nice=10
+CPUWeight=20
+IOSchedulingClass=idle
+ExecStart=/home/pi/Investeren-en-beleggen/.venv/bin/python fetch_prices.py

@@ -7,3 +7,4 @@ anthropic>=0.40
 Markdown>=3.5
 python-dotenv>=1.0
 pytest>=8.0
+gunicorn>=21.0

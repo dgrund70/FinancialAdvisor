@@ -1,0 +1,10 @@
+[Unit]
+Description=Beleggingsdashboard — nachtelijke data-update
+
+[Timer]
+# Elke nacht om 02:30. Pas aan zodat het buiten Nightwatch' drukke momenten valt.
+OnCalendar=*-*-* 02:30:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target

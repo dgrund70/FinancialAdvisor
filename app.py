@@ -1594,6 +1594,13 @@ with app.app_context():
 if __name__ == "__main__":
     # Debug staat standaard UIT: de Werkzeug-debugger voert willekeurige code uit
     # bij een fout en mag nooit zomaar aanstaan. Zet FLASK_DEBUG=1 om 'm tijdens
-    # ontwikkeling aan te zetten. Expliciet aan 127.0.0.1 binden houdt de app lokaal.
+    # ontwikkeling aan te zetten.
+    #
+    # Bind standaard op 127.0.0.1 (lokaal/veilig op de Mac). Op de Raspberry Pi
+    # zet je HOST=0.0.0.0 (via de systemd-service) om de app op het thuisnetwerk
+    # bereikbaar te maken. In productie draaien we via gunicorn (zie deploy/),
+    # dat de bind zelf bepaalt; deze fallback is voor `python app.py`.
     debug = os.environ.get("FLASK_DEBUG", "").lower() in ("1", "true", "yes", "on")
-    app.run(host="127.0.0.1", port=5002, debug=debug)
+    host  = os.environ.get("HOST", "127.0.0.1")
+    port  = int(os.environ.get("PORT", "5002"))
+    app.run(host=host, port=port, debug=debug)
