@@ -258,37 +258,46 @@ def bouw_context(posities, koersen, wisselkoersen, macro, ticker_nieuws,
     for ticker, naam, aantal, aankoopprijs, aankoopdatum, account_naam, koers_type, handmatige_koers, pos_valuta in posities:
         positie_tickers.append(ticker)
         pos_valuta = pos_valuta or "EUR"
-        # Handmatige koers heeft voorrang
+        # Handmatige koers heeft voorrang; gebruik pos_valuta voor de EUR-omrekening
+        # zodat een handmatige USD-koers correct naar EUR wordt omgezet.
         if koers_type == "handmatig" and handmatige_koers:
-            koers_eur = float(handmatige_koers)
-            valuta    = "EUR"
+            koers_eur = naar_eur(float(handmatige_koers), pos_valuta, wisselkoersen)
+            if koers_eur is None:
+                koers_eur = float(handmatige_koers)  # geen FX: gebruik native
+            valuta = pos_valuta
         else:
             k         = koersen.get(ticker, {})
             koers_eur = naar_eur(k.get("koers"), k.get("valuta", "EUR"), wisselkoersen)
             valuta    = k.get("valuta", "EUR")
 
-        # GAK omrekenen naar EUR via de handelsvaluta van de positie (USD-GAK
-        # mag niet als EUR worden behandeld).
-        gak_eur = naar_eur(aankoopprijs, pos_valuta, wisselkoersen)
-        if gak_eur is None:
-            gak_eur = aankoopprijs
-        waarde = aantal * koers_eur if koers_eur is not None else None
-        kosten = aantal * gak_eur
+        # GAK omrekenen naar EUR; geen fallback op native valuta (zou EUR ≠ USD mixen).
+        gak_eur   = naar_eur(aankoopprijs, pos_valuta, wisselkoersen)
+        waarde    = (aantal * koers_eur) if koers_eur is not None else None
+        kosten_eur = (aantal * gak_eur) if gak_eur is not None else None
 
-        if waarde is not None:
-            winst     = waarde - kosten
-            winst_pct = winst / kosten * 100 if kosten else 0
+        if waarde is not None and kosten_eur is not None:
+            winst     = waarde - kosten_eur
+            winst_pct = winst / kosten_eur * 100 if kosten_eur else 0
             totaal_waarde += waarde
-            totaal_kosten += kosten
+            totaal_kosten += kosten_eur
             label = "handmatig" if koers_type == "handmatig" else valuta
             positie_regels.append(
                 f"- **{ticker}** ({naam or ticker}) [{account_naam}]: "
                 f"{aantal} × €{gak_eur:.2f} → huidig €{waarde:.2f} ({winst_pct:+.1f}%) [{label}]"
             )
-        else:
+        elif waarde is not None:
+            # GAK kan niet naar EUR worden omgerekend (FX ontbreekt).
+            totaal_waarde += waarde
             positie_regels.append(
                 f"- **{ticker}** ({naam or ticker}) [{account_naam}]: "
-                f"{aantal} × €{gak_eur:.2f}  (koers onbekend)"
+                f"{aantal} × {aankoopprijs:.2f} {pos_valuta} → huidig €{waarde:.2f} "
+                f"(rendement onbekend: FX {pos_valuta} ontbreekt)"
+            )
+        else:
+            gak_label = f"€{gak_eur:.2f}" if gak_eur is not None else f"{aankoopprijs:.2f} {pos_valuta}"
+            positie_regels.append(
+                f"- **{ticker}** ({naam or ticker}) [{account_naam}]: "
+                f"{aantal} × {gak_label}  (koers onbekend)"
             )
 
     titel = f"## Portefeuille{f' — tag: {tag_naam}' if tag_naam else ''}"
@@ -502,6 +511,9 @@ def genereer(gebruiker_id, tag_id=None):
         messages = [{"role": "user", "content": bouw_prompt(context, tag_naam)}],
     )
 
+    if not bericht.content:
+        print("[ERROR] Lege API-response (mogelijk content filtering). Advies niet opgeslagen.")
+        sys.exit(1)
     advies_tekst = bericht.content[0].text
 
     risico_score, risico_reden, tip_tickers, advies_tekst = parse_kop(advies_tekst)

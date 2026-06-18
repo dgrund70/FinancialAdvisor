@@ -1,5 +1,6 @@
 import bisect
 import json
+import math
 import os
 import re
 import secrets
@@ -51,13 +52,6 @@ PRIJZEN  = BASE_DIR / "data" / "prijzen.json"
 DB_PATH  = BASE_DIR / "data" / "app.db"
 
 RISICOVRIJE_RENTE = 0.025   # voor de Sharpe-ratio (EUR-cash/korte rente, jaarbasis)
-
-# Laad omgevingsvariabelen uit .env (indien aanwezig) vóór ze gelezen worden.
-try:
-    from dotenv import load_dotenv
-    load_dotenv(BASE_DIR / ".env")
-except ImportError:
-    pass
 
 def _laad_secret_key():
     """Bepaal de Flask SECRET_KEY zonder ooit terug te vallen op een publiek
@@ -150,6 +144,8 @@ def inject_begrippen():
 def compact_float(value):
     if value is None:
         return "—"
+    if not math.isfinite(value):
+        return "—"
     if value == int(value):
         return str(int(value))
     return f"{value:.4f}".rstrip("0").rstrip(".")
@@ -202,7 +198,8 @@ def bereken_posities(posities, koersen, wisselkoersen=None):
 
         # Handmatige koers heeft voorrang boven live koers
         if pos.koers_type == "handmatig" and pos.handmatige_koers is not None:
-            k      = {"koers": pos.handmatige_koers, "dag": 0.0, "dag_pct": 0.0, "valuta": "EUR"}
+            k      = {"koers": pos.handmatige_koers, "dag": 0.0, "dag_pct": 0.0,
+                      "valuta": getattr(pos, "valuta", "EUR") or "EUR"}
         else:
             k = koersen.get(pos.ticker, {})
 
@@ -299,16 +296,22 @@ def gebruiker_verwijderen(gebruiker_id):
 
 def _externe_flows(account, wisselkoersen):
     """Externe cashflows (storting/opname) van een account, in EUR, voor XIRR.
-    Storting = negatief (geld de portefeuille in), opname = positief."""
+    Storting = negatief (geld de portefeuille in), opname = positief.
+
+    Retourneert (flows, had_fx_issues). had_fx_issues=True als één of meer
+    flows wegens ontbrekende FX-koers overgeslagen werden — de XIRR is dan
+    gebaseerd op onvolledige data."""
     flows = []
+    had_fx_issues = False
     for tx in account.transacties:
         if tx.type not in ("storting", "opname"):
             continue
         bedrag_eur = naar_eur(tx.bedrag or 0.0, tx.valuta or "EUR", wisselkoersen)
         if bedrag_eur is None:
+            had_fx_issues = True
             continue
         flows.append((tx.datum, -bedrag_eur if tx.type == "storting" else bedrag_eur))
-    return flows
+    return flows, had_fx_issues
 
 
 def _maak_prijs_op(ticker):
@@ -371,6 +374,7 @@ def dashboard(gebruiker_id):
     grand_gerealiseerd = grand_cash_eur = 0.0
     grand_has_prices = False
     grand_flows = []
+    grand_fx_issues = False
 
     for account in accounts:
         rows, tw, tk, td, tg = bereken_posities(account.posities, koersen, wisselkoersen)
@@ -378,9 +382,13 @@ def dashboard(gebruiker_id):
 
         cash      = cash_saldi(account.id)
         cash_eur  = sum((naar_eur(s, v, wisselkoersen) or 0.0) for v, s in cash.items())
-        flows     = _externe_flows(account, wisselkoersen)
+        flows, had_fx = _externe_flows(account, wisselkoersen)
         eind_eur  = (tw or 0.0) + cash_eur
-        acc_xirr  = xirr(flows + [(date.today(), eind_eur)]) if flows else None
+        # Bereken XIRR alleen als de eindwaarde betrouwbaar is: prijzen beschikbaar
+        # (hp) of het account heeft geen open posities (puur cash-account).
+        heeft_open = bool(rows)
+        acc_xirr  = (xirr(flows + [(date.today(), eind_eur)])
+                     if flows and (hp or not heeft_open) else None)
 
         account_data.append({
             "account":      account,
@@ -392,10 +400,12 @@ def dashboard(gebruiker_id):
             "cash":         cash,
             "cash_eur":     cash_eur,
             "xirr":         acc_xirr,
+            "fx_issues":    had_fx,
         })
         grand_gerealiseerd += tg
         grand_cash_eur     += cash_eur
         grand_flows        += flows
+        grand_fx_issues     = grand_fx_issues or had_fx
         if hp:
             grand_has_prices = True
             grand_waarde += tw
@@ -403,7 +413,9 @@ def dashboard(gebruiker_id):
             grand_dag    += td
 
     grand_eind = (grand_waarde if grand_has_prices else 0.0) + grand_cash_eur
-    grand_xirr = xirr(grand_flows + [(date.today(), grand_eind)]) if grand_flows else None
+    heeft_open_globaal = any(bool(d["rows"]) for d in account_data)
+    grand_xirr = (xirr(grand_flows + [(date.today(), grand_eind)])
+                  if grand_flows and (grand_has_prices or not heeft_open_globaal) else None)
     benchmarks = _benchmark_vergelijkingen(grand_flows)
 
     twr_res = _portefeuille_twr(accounts)
@@ -550,10 +562,17 @@ def _portefeuille_twr(accounts, venster=400):
             prijs  = tx.prijs or 0.0
             kosten = tx.kosten or 0.0
             if tx.type == "koop":
-                flow_d += naar_eur(aantal * prijs + kosten, v, wisselkoersen) or 0.0
+                flow_eur = naar_eur(aantal * prijs + kosten, v, wisselkoersen)
+                if flow_eur is None:
+                    # FX ontbreekt: schat op basis van EUR-koershistorie (al FX-gecorrigeerd)
+                    flow_eur = aantal * (laatste_koers.get(tx.ticker) or 0.0)
+                flow_d += flow_eur
                 qty[tx.ticker] = qty.get(tx.ticker, 0.0) + aantal
             elif tx.type == "verkoop":
-                flow_d -= naar_eur(aantal * prijs - kosten, v, wisselkoersen) or 0.0
+                flow_eur = naar_eur(aantal * prijs - kosten, v, wisselkoersen)
+                if flow_eur is None:
+                    flow_eur = aantal * (laatste_koers.get(tx.ticker) or 0.0)
+                flow_d -= flow_eur
                 qty[tx.ticker] = qty.get(tx.ticker, 0.0) - aantal
             elif tx.type == "correctie":
                 oud   = qty.get(tx.ticker, 0.0)
@@ -1098,7 +1117,7 @@ def transactie_verwijderen(gebruiker_id, transactie_id):
 @app.route("/gebruiker/<int:gebruiker_id>/herbereken", methods=["POST"])
 def herbereken(gebruiker_id):
     Gebruiker.query.get_or_404(gebruiker_id)
-    herbereken_alles()
+    herbereken_alles(gebruiker_id)
     flash("Holdings opnieuw berekend uit het grootboek.", "success")
     return redirect(url_for("dashboard", gebruiker_id=gebruiker_id))
 

@@ -60,8 +60,11 @@ def herbereken_positie(account_id, ticker):
             if eerste_koop_datum is None:
                 eerste_koop_datum = tx.datum
         elif tx.type == "verkoop":
-            realized += aantal * prijs - aantal * avg - kosten
-            qty -= aantal
+            # Cap op werkelijk beschikbare stuks zodat realized niet te ver afloopt
+            # bij corrupte data (bijv. ontbrekende koop-transactie).
+            te_verkopen = min(aantal, max(qty, 0.0))
+            realized += te_verkopen * prijs - te_verkopen * avg - kosten
+            qty -= te_verkopen
             if qty <= _EPS:        # volledig verkocht → reset GAK voor her-aankoop
                 qty = avg = 0.0
         elif tx.type == "correctie":
@@ -124,13 +127,20 @@ def cash_saldi(account_id):
     return {v: round(s, 2) for v, s in saldi.items()}
 
 
-def herbereken_alles():
+def herbereken_alles(gebruiker_id=None):
     """Self-heal: herbereken elke (account, ticker) opnieuw uit het grootboek.
-    Commit zelf. Te gebruiken als onderhouds-/herstelactie."""
-    paren = (db.session.query(Transactie.broker_account_id, Transactie.ticker)
-             .filter(Transactie.ticker.isnot(None),
-                     Transactie.type.in_(_AANDEEL_TYPES))
-             .distinct().all())
+    Commit zelf. Te gebruiken als onderhouds-/herstelactie.
+
+    gebruiker_id: als opgegeven, alleen de posities van die gebruiker."""
+    from models import BrokerAccount
+    q = (db.session.query(Transactie.broker_account_id, Transactie.ticker)
+         .filter(Transactie.ticker.isnot(None),
+                 Transactie.type.in_(_AANDEEL_TYPES)))
+    if gebruiker_id is not None:
+        q = q.join(BrokerAccount,
+                   Transactie.broker_account_id == BrokerAccount.id
+                   ).filter(BrokerAccount.gebruiker_id == gebruiker_id)
+    paren = q.distinct().all()
     for account_id, ticker in paren:
         herbereken_positie(account_id, ticker)
     db.session.commit()
