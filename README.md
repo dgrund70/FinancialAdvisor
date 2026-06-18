@@ -1,34 +1,45 @@
 # FinancialAdvisor — Beleggingsdashboard
 
-Een Flask-webapp voor persoonlijk portefeuillebeheer met live koersen, meerdere
-gebruikers, en een AI-adviesmodule op basis van de Claude API.
+Een Flask-webapp voor persoonlijk portefeuillebeheer: een transactie-grootboek met
+realized/ongerealiseerd rendement, geld- én tijd-gewogen rendement, benchmark- en
+risico-analyse, en een AI-adviesmodule op basis van de Claude API.
 
 > ⚠️ Dit project geeft **geen** officieel financieel advies. Het is een persoonlijk
 > hulpmiddel voor inzicht en educatie.
 
 ## Functies
 
-- **Portefeuille-overzicht** — totale waarde, dagrendement en totaalrendement per
-  positie en per broker-account.
+- **Portefeuille-overzicht** — totale waarde, dagrendement, ongerealiseerd én
+  gerealiseerd rendement, en cash-saldo, per positie en per broker-account.
+- **Transactie-grootboek** — holdings worden afgeleid uit koop/verkoop/dividend/
+  storting/opname-transacties (average-cost). Zo zie je je werkelijke kostprijs (GAK),
+  gerealiseerde winst en cash. Posities snel toevoegen kan ook (legt een eerste koop vast).
+- **Rendement: XIRR & TWR** — geld-gewogen rendement (XIRR, houdt rekening met de
+  timing van je stortingen) en tijd-gewogen rendement (TWR, de eerlijke maatstaf om je
+  met een index te vergelijken).
+- **Benchmarkvergelijking** — "had ik beter de index kunnen kopen?": je werkelijke
+  stortingen gesimuleerd in MSCI World / Nasdaq 100 (deposit-matched), met het verschil
+  in procentpunten.
+- **Analyse-pagina** — allocatie (sector, regio, type, valuta), concentratie (top-5,
+  effectief aantal posities, waarschuwingen), en risico: volatiliteit, max drawdown,
+  Sharpe-ratio, bèta vs. de wereldindex, en een correlatiematrix.
 - **Live koersen** — aandelen/ETF's via [yfinance](https://pypi.org/project/yfinance/)
-  (Yahoo Finance) en crypto via de [CoinGecko](https://www.coingecko.com/)-API,
-  inclusief automatische omrekening naar euro.
-- **Meerdere gebruikers** — wissel via de account-switcher in de navbar; elke
-  gebruiker heeft eigen broker-accounts, posities, tags en adviezen.
-- **Posities beheren** — toevoegen, **bewerken** en verwijderen, met handmatige of
-  live koers en vrije tags.
-- **Ticker-autocomplete** — typ een naam of ticker (bijv. `VWCE` of `Vanguard`) en
-  kies uit live suggesties; liquide EUR-beurzen staan bovenaan.
-- **AI-adviesmodule** — genereert per gebruiker (of per tag) een gestructureerd
-  beleggingsadvies via de Claude API, met risicoscore, koop-tips en
-  rendement-tracking van eerdere tips.
-- **Nieuws per positie** — recent nieuws per ticker via yfinance, gebruikt als
-  context voor het advies.
+  en crypto via de [CoinGecko](https://www.coingecko.com/)-API, met automatische
+  omrekening naar euro.
+- **AI-adviesmodule** — genereert per gebruiker (of per tag) een gestructureerd advies
+  via de Claude API, **onderbouwd met echte fundamentals** (waardering, groei, marges,
+  analisten-koersdoel), macro-indicatoren en recent nieuws — met risicoscore, koop-tips
+  en rendement-tracking van eerdere tips.
+- **Volglijst** — kandidaat-tickers die het advies met echte fundamentals beoordeelt
+  als ideeën voor nieuwe posities.
+- **Uitleg voor beginners** — bij elke "moeilijke" waarde een ⓘ-icoon met een korte
+  uitleg in gewone taal.
+- **Meerdere gebruikers**, **tags**, en **ticker-autocomplete** (typ `VWCE` of `Vanguard`).
 
 ## Vereisten
 
 - Python 3.10 of nieuwer
-- Internettoegang (voor koersen, nieuws en ticker-zoeken)
+- Internettoegang (koersen, nieuws, fundamentals, ticker-zoeken)
 - Optioneel: een **Anthropic API-key** voor de adviesmodule
 
 ## Installatie
@@ -36,105 +47,113 @@ gebruikers, en een AI-adviesmodule op basis van de Claude API.
 ```bash
 git clone https://github.com/dgrund70/FinancialAdvisor.git
 cd FinancialAdvisor
-
-python3 -m venv .venv
-source .venv/bin/activate
+python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
 ## Starten
 
 ```bash
-source .venv/bin/activate
-python3 app.py
+# Ontwikkeling (Flask dev-server)
+python3 app.py                         # http://localhost:5002
+
+# Productie-draaimodel (zoals op de Pi) — let op: ÉÉN worker
+gunicorn -w 1 --threads 4 --bind 0.0.0.0:5002 app:app
 ```
 
-Open daarna **http://localhost:5002** in je browser.
+Bij de eerste start maakt de app `data/app.db` aan met een standaardgebruiker en
+broker-account. Eén worker is bewust: de "Ververs"-achtergrondtaken houden hun status
+in het geheugen bij.
 
-Bij de eerste start maakt de app automatisch de database (`data/app.db`) aan, met
-een standaardgebruiker *"Mijn account"* en een broker-account *"Mijn portefeuille"*.
-Voeg een broker-account en posities toe om te beginnen.
+## Omgevingsvariabelen
 
-### AI-advies inschakelen
+| Variabele | Doel |
+|---|---|
+| `ANTHROPIC_API_KEY` | Vereist voor "Genereer advies". Zonder key werkt de rest gewoon. |
+| `SECRET_KEY` | Flask-sessiesleutel. Leeg laten = de app genereert en bewaart automatisch een sterke sleutel in `data/secret_key`. |
+| `HOST` / `PORT` | Bind-adres/poort (default `127.0.0.1` / `5002`). Zet `HOST=0.0.0.0` om op het LAN bereikbaar te zijn. |
+| `FLASK_DEBUG` | `1` zet de debugger aan (alleen voor ontwikkeling; standaard uit). |
 
-De adviesmodule vereist een Anthropic API-key. Zet die als omgevingsvariabele
-**voordat** je de app start:
+Kopieer `.env.example` naar `.env` en vul je waarden in (`.env` staat in `.gitignore`).
+
+## Data verversen
+
+Koersen, nieuws, fundamentals en historie kun je in de app verversen met de knoppen,
+of los via de scripts:
 
 ```bash
-export ANTHROPIC_API_KEY=sk-ant-...
-python3 app.py
+python3 fetch_prices.py        # koersen → data/prijzen.json   (--loop voor elke 15 min)
+python3 fetch_news.py          # nieuws → database             (--loop voor elk uur)
+python3 fetch_fundamentals.py  # fundamentals per holding + volglijst
+python3 fetch_historie.py      # dagelijkse EUR-koershistorie (voor TWR/risico)
+python3 fetch_benchmark.py     # benchmark-koersen (voor de vergelijking)
 ```
 
-Zonder key werkt het dashboard gewoon; alleen de knop *"Genereer advies"* is
-uitgeschakeld.
+Op een server kun je deze automatisch op schema laten draaien.
 
-> Tip: zet ook een eigen `SECRET_KEY` voor de Flask-sessies:
-> `export SECRET_KEY=$(python3 -c "import secrets; print(secrets.token_hex(32))")`
+## 24/7 op een Raspberry Pi
 
-## Koersen & nieuws verversen
+Voor altijd-aan draaien op een Pi (bereikbaar op je thuisnetwerk, met geplande
+updates via systemd-timers): zie **[`deploy/README.md`](deploy/README.md)** — bevat de
+systemd-units, het runbook en hoe het netjes naast andere projecten draait.
 
-Koersen en nieuws kun je in de app verversen met de knoppen, of los via scripts:
+> **Beveiliging:** de app heeft geen login. Op het LAN vertrouw je het thuisnetwerk;
+> stel poort 5002 **niet** open naar internet.
 
-```bash
-# Koersen ophalen (schrijft naar data/prijzen.json)
-python3 fetch_prices.py            # eenmalig
-python3 fetch_prices.py --loop     # elke 15 minuten herhalen
+## Tickers gebruiken
 
-# Nieuws ophalen (schrijft naar de database)
-python3 fetch_news.py              # eenmalig
-python3 fetch_news.py --loop       # elk uur herhalen
-```
-
-`start_prijzen.sh` is een hulpscript dat de venv aanmaakt, dependencies installeert
-en `fetch_prices.py` start:
-
-```bash
-chmod +x start_prijzen.sh
-./start_prijzen.sh           # eenmalig
-./start_prijzen.sh --loop    # elke 15 min
-```
-
-### Tickers gebruiken
-
-Gebruik de **Yahoo Finance-ticker** inclusief beurssuffix, bijvoorbeeld
-`VWCE.AS` (Amsterdam) of `XNAS.DE` (XETRA). De ticker-autocomplete helpt je de
-juiste te vinden. Voor crypto gebruik je `BASE-QUOTE`, bijvoorbeeld `BTC-EUR` of
-`ETH-EUR`.
+Gebruik de **Yahoo Finance-ticker** inclusief beurssuffix, bv. `VWCE.AS` (Amsterdam)
+of `XNAS.DE` (XETRA); de autocomplete helpt. Voor crypto: `BASE-QUOTE`, bv. `BTC-EUR`.
 
 ## Projectstructuur
 
 ```
-app.py                 Flask-app: routes, dashboard, posities, advies, API
-models.py              SQLAlchemy-datamodel (gebruiker → account → positie → tag)
-helpers.py             Gedeelde hulpfuncties (o.a. valuta-omrekening)
-fetch_prices.py        Koersen ophalen (yfinance + CoinGecko)
-fetch_news.py          Nieuws ophalen (yfinance)
-advies_generator.py    Beleggingsadvies genereren via de Claude API
-templates/             Jinja2-templates (Bootstrap 5)
-static/                CSS
-data/                  Database en koersen (lokaal, niet in git)
-requirements.txt       Python-dependencies
+app.py                 Flask-app: routes, dashboard, analyse, advies, achtergrondtaken
+models.py              SQLAlchemy-datamodel + begrippenlijst voor de uitleg-icoontjes
+projectie.py           Leidt Positie-cache af uit het Transactie-grootboek (average-cost)
+helpers.py             Pure berekeningen: valuta, XIRR, TWR, volatiliteit, Sharpe, bèta, correlatie
+fetch_prices.py        Koersen (yfinance + CoinGecko)
+fetch_news.py          Nieuws (yfinance)
+fetch_fundamentals.py  Fundamentals per ticker (yfinance)
+fetch_historie.py      Dagelijkse EUR-koershistorie (yfinance + FX)
+fetch_benchmark.py     Benchmark-koershistorie (yfinance)
+advies_generator.py    Beleggingsadvies via de Claude API
+templates/             Jinja2-templates (Bootstrap 5, Chart.js); macros.html = uitleg-icoon
+deploy/                systemd-units + runbook voor de Raspberry Pi
+tests/                 pytest voor de reken-logica
+data/                  Database + caches (lokaal, niet in git)
 ```
 
 ## Datamodel
 
 ```
-Gebruiker ──< BrokerAccount ──< Positie >──< Tag
-   └──< Advies ──< Aanbeveling
-NieuwsArtikel  (cache, per ticker)
+Gebruiker ──< BrokerAccount ──< Positie >──< Tag        (Positie = cache, afgeleid uit Transactie)
+   │                        └──< Transactie               (grootboek = bron van waarheid)
+   ├──< Advies ──< Aanbeveling
+   └──< Volglijst
+Caches: NieuwsArtikel · Fundamental · KoersHistorie · BenchmarkPunt
 ```
 
-Een gebruiker heeft meerdere broker-accounts; elk account heeft posities; posities
-kunnen meerdere tags hebben (many-to-many). Adviezen en aanbevelingen horen bij een
-gebruiker (optioneel gefilterd op tag).
+Een gebruiker heeft broker-accounts met transacties; daaruit worden de posities
+(aantal + gemiddelde aankoopprijs + gerealiseerde winst) afgeleid. Adviezen,
+aanbevelingen en de volglijst horen bij een gebruiker.
 
 ## Privacy & data
 
-De map `data/` (database, koersen, backups) staat in `.gitignore` en wordt **niet**
-meegecommit — je portefeuille blijft lokaal. De `ANTHROPIC_API_KEY` wordt alleen
-uit de omgeving gelezen en nooit opgeslagen.
+`data/` (database, koersen, caches, backups, sessiesleutel) staat in `.gitignore` en
+wordt **niet** meegecommit — je portefeuille blijft lokaal. De `ANTHROPIC_API_KEY`
+wordt alleen uit de omgeving gelezen en nooit opgeslagen.
+
+## Tests
+
+```bash
+python3 -m pytest -q
+```
+
+Dekt de pure reken-logica (average-cost-projectie, XIRR, TWR, Sharpe, correlatie,
+benchmark).
 
 ## Technische stack
 
-Flask · Flask-SQLAlchemy · Flask-WTF (CSRF) · SQLite · yfinance · CoinGecko ·
-Anthropic Claude API · Bootstrap 5 · Chart.js
+Flask · Flask-SQLAlchemy · Flask-WTF (CSRF) · gunicorn · SQLite · yfinance · CoinGecko ·
+Anthropic Claude API · Bootstrap 5 · Chart.js · systemd (Pi-deployment)
