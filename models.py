@@ -41,6 +41,10 @@ class Gebruiker(db.Model):
         "Advies", backref="gebruiker",
         cascade="all, delete-orphan", lazy=True
     )
+    volglijst = db.relationship(
+        "Volglijst", backref="gebruiker",
+        cascade="all, delete-orphan", lazy=True
+    )
 
 
 class BrokerAccount(db.Model):
@@ -187,6 +191,20 @@ class Fundamental(db.Model):
     aanbeveling        = db.Column(db.String(30), nullable=True)  # recommendationKey
     valuta             = db.Column(db.String(10), nullable=True)
     opgehaald          = db.Column(db.DateTime, default=datetime.utcnow)
+
+
+class Volglijst(db.Model):
+    """Kandidaat-tickers per gebruiker; de adviesmodule beoordeelt deze met
+    echte fundamentals als ideeën voor nieuwe posities."""
+    __tablename__ = "volglijst"
+    id           = db.Column(db.Integer, primary_key=True)
+    gebruiker_id = db.Column(db.Integer, db.ForeignKey("gebruikers.id"), nullable=False)
+    ticker       = db.Column(db.String(20), nullable=False)
+    notitie      = db.Column(db.String(200), nullable=True)
+    toegevoegd   = db.Column(db.DateTime, default=datetime.utcnow)
+    __table_args__ = (
+        db.UniqueConstraint("gebruiker_id", "ticker", name="uq_volglijst_gebruiker_ticker"),
+    )
 
 
 class KoersHistorie(db.Model):

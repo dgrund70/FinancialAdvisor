@@ -149,3 +149,70 @@ def beta(port_rendementen, bench_rendementen):
     cov = sum((pi - gp) * (bi - gb) for pi, bi in zip(p, b)) / (n - 1)
     var = sum((bi - gb) ** 2 for bi in b) / (n - 1)
     return cov / var if var else None
+
+
+def correlatie(rend_a, rend_b):
+    """Pearson-correlatie van gepaarde dagrendementen (laatste min-lengte)."""
+    n = min(len(rend_a), len(rend_b))
+    if n < 2:
+        return None
+    a = rend_a[-n:]
+    b = rend_b[-n:]
+    ga = sum(a) / n
+    gb = sum(b) / n
+    cov  = sum((ai - ga) * (bi - gb) for ai, bi in zip(a, b))
+    va   = sum((ai - ga) ** 2 for ai in a)
+    vb   = sum((bi - gb) ** 2 for bi in b)
+    noemer = (va * vb) ** 0.5
+    return cov / noemer if noemer else None
+
+
+def annualiseer(cum_rendement, dagen):
+    """Reken een cumulatief rendement over `dagen` kalenderdagen om naar jaarbasis."""
+    if not dagen or dagen <= 0 or cum_rendement is None or cum_rendement <= -1:
+        return None
+    return (1.0 + cum_rendement) ** (365.0 / dagen) - 1.0
+
+
+def twr(navs, flows):
+    """Tijd-gewogen (keten-)rendement uit een dagelijkse NAV-reeks + externe flows.
+
+    `navs[i]` = portefeuillewaarde aan het eind van dag i (de flow van die dag
+    zit er al in); `flows[i]` = netto externe storting(+)/opname(−) op dag i. De
+    flow wordt eruit gehaald zodat hij niet als rendement telt: dagrendement
+    `(navs[i] - flows[i]) / navs[i-1] - 1`; geeft het geketende rendement
+    `∏(1 + r_i) - 1`. None bij <2 punten of geen geldige startwaarde.
+    """
+    if len(navs) < 2 or len(navs) != len(flows):
+        return None
+    factor = 1.0
+    stappen = 0
+    for i in range(1, len(navs)):
+        vorige = navs[i - 1]
+        if vorige and vorige > 0:
+            r = (navs[i] - flows[i]) / vorige - 1.0
+            factor *= (1.0 + r)
+            stappen += 1
+    if stappen == 0:
+        return None
+    return factor - 1.0
+
+
+def sharpe(rendementen, rf=0.025, periodes=252):
+    """Sharpe-ratio: (geannualiseerd rendement − rf) / geannualiseerde volatiliteit.
+
+    `rendementen` = dagrendementen; `rf` = risicovrije rente (jaarbasis).
+    Geannualiseerd rendement geometrisch uit de dagrendementen. None bij <2 of
+    nul-volatiliteit.
+    """
+    n = len(rendementen)
+    if n < 2:
+        return None
+    vol = volatiliteit(rendementen, periodes)
+    if not vol:
+        return None
+    groei = 1.0
+    for r in rendementen:
+        groei *= (1.0 + r)
+    ann_rendement = groei ** (periodes / n) - 1.0
+    return (ann_rendement - rf) / vol

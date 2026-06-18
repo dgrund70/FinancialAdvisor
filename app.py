@@ -23,10 +23,12 @@ from markupsafe import Markup, escape
 from sqlalchemy import inspect as sa_inspect, text
 from sqlalchemy.orm import selectinload
 from helpers import (naar_eur, xirr, benchmark_eindwaarde,
-                     dagrendementen, volatiliteit, max_drawdown, beta)
+                     dagrendementen, volatiliteit, max_drawdown, beta,
+                     twr, sharpe, correlatie, annualiseer)
 from models import (Advies, Aanbeveling, BenchmarkPunt, BENCHMARKS,
                     BrokerAccount, Fundamental, Gebruiker, KoersHistorie,
-                    NieuwsArtikel, Positie, Tag, Transactie, TRANSACTIE_TYPES, db)
+                    NieuwsArtikel, Positie, Tag, Transactie, TRANSACTIE_TYPES,
+                    Volglijst, db)
 from projectie import (cash_saldi, herbereken_alles, herbereken_positie,
                        na_transactie_wijziging)
 from fetch_prices import is_crypto
@@ -47,6 +49,8 @@ except ImportError:
 BASE_DIR = Path(__file__).parent
 PRIJZEN  = BASE_DIR / "data" / "prijzen.json"
 DB_PATH  = BASE_DIR / "data" / "app.db"
+
+RISICOVRIJE_RENTE = 0.025   # voor de Sharpe-ratio (EUR-cash/korte rente, jaarbasis)
 
 # Laad omgevingsvariabelen uit .env (indien aanwezig) vóór ze gelezen worden.
 try:
@@ -358,6 +362,10 @@ def dashboard(gebruiker_id):
     grand_xirr = xirr(grand_flows + [(date.today(), grand_eind)]) if grand_flows else None
     benchmarks = _benchmark_vergelijkingen(grand_flows)
 
+    twr_res = _portefeuille_twr(accounts)
+    grand_twr = (twr_res.get("geannualiseerd")
+                 if twr_res and not twr_res.get("te_weinig_data") else None)
+
     return render_template(
         "dashboard.html",
         gebruiker    = gebruiker,
@@ -370,6 +378,7 @@ def dashboard(gebruiker_id):
             "cash_eur":     grand_cash_eur,
             "xirr":         grand_xirr,
             "eind":         grand_eind,
+            "twr":          grand_twr,
         },
         benchmarks   = benchmarks,
         heeft_flows  = bool(grand_flows),
@@ -422,10 +431,23 @@ def _portefeuille_risico(holdings, benchmark_ticker="IWDA.AS", venster=252):
 
     waarden   = [sum(a * serie[t][d] for t, a in gedekt) for d in gemeen]
     port_rend = dagrendementen(waarden)
+
+    # Volatiliteit per holding + correlatiematrix (op de gemene datums).
+    rend_per_ticker = {t: dagrendementen([serie[t][d] for d in gemeen]) for t, _ in gedekt}
+    per_holding = sorted(
+        [{"ticker": t, "vol": volatiliteit(rend_per_ticker[t])} for t, _ in gedekt],
+        key=lambda h: (h["vol"] is None, -(h["vol"] or 0)))
+    matrix_tickers = [t for t, _ in gedekt]
+    matrix = [[(1.0 if ti == tj else correlatie(rend_per_ticker[ti], rend_per_ticker[tj]))
+               for tj in matrix_tickers] for ti in matrix_tickers]
+
     res = {
         "volatiliteit":    volatiliteit(port_rend),
         "max_drawdown":    max_drawdown(waarden),
+        "sharpe":          sharpe(port_rend, rf=RISICOVRIJE_RENTE),
         "beta":            None,
+        "per_holding":     per_holding,
+        "correlatie":      {"tickers": matrix_tickers, "matrix": matrix},
         "dekking":         len(gedekt),
         "totaal_holdings": len(holdings),
         "dagen":           len(gemeen),
@@ -436,12 +458,98 @@ def _portefeuille_risico(holdings, benchmark_ticker="IWDA.AS", venster=252):
     return res
 
 
+def _portefeuille_twr(accounts, venster=400):
+    """Tijd-gewogen rendement van de belegde holdings.
+
+    Waardeert alleen de **holdings** (Σ qty·koers, EUR) per dag uit het grootboek
+    + koers_historie, en behandelt aan-/verkopen (en correcties) als externe
+    flows naar die pot. Zo meet TWR puur het rendement van je posities, los van
+    de timing van stortingen — en hangt het niet af van een (hier ontbrekend)
+    cash-saldo. Geeft {cumulatief, geannualiseerd, dagen, dekking, ...} of None.
+    """
+    _, _, wisselkoersen = laad_prijzen()
+    txs = [tx for acc in accounts for tx in acc.transacties]
+    if not txs:
+        return None
+
+    aandeel_tickers = {tx.ticker for tx in txs
+                       if tx.type in ("koop", "verkoop", "correctie") and tx.ticker}
+    hist   = _laad_historie(aandeel_tickers)
+    gedekt = {t for t in aandeel_tickers if t in hist and len(hist[t][0]) > 2}
+    if not gedekt:
+        return {"dekking": 0, "totaal_holdings": len(aandeel_tickers), "te_weinig_data": True}
+
+    serie = {t: dict(zip(hist[t][0], hist[t][1])) for t in gedekt}
+    grid  = sorted({d for t in gedekt for d in serie[t]})[-venster:]
+    if len(grid) < 20:
+        return {"dekking": len(gedekt), "totaal_holdings": len(aandeel_tickers),
+                "te_weinig_data": True}
+
+    txs_sorted = sorted(txs, key=lambda t: (t.datum, t.id))
+    qty, laatste_koers = {}, {}
+    idx = 0
+    navs, flows = [], []
+
+    for d in grid:
+        for t in gedekt:                       # carry-forward laatst bekende koers ≤ d
+            if d in serie[t]:
+                laatste_koers[t] = serie[t][d]
+        flow_d = 0.0
+        # Trades t/m deze datum: het bedrag dat de holdings-pot in/uit gaat is een
+        # externe flow (geen rendement).
+        while idx < len(txs_sorted) and txs_sorted[idx].datum <= d:
+            tx = txs_sorted[idx]; idx += 1
+            if tx.ticker not in gedekt:
+                continue
+            v      = tx.valuta or "EUR"
+            aantal = tx.aantal or 0.0
+            prijs  = tx.prijs or 0.0
+            kosten = tx.kosten or 0.0
+            if tx.type == "koop":
+                flow_d += naar_eur(aantal * prijs + kosten, v, wisselkoersen) or 0.0
+                qty[tx.ticker] = qty.get(tx.ticker, 0.0) + aantal
+            elif tx.type == "verkoop":
+                flow_d -= naar_eur(aantal * prijs - kosten, v, wisselkoersen) or 0.0
+                qty[tx.ticker] = qty.get(tx.ticker, 0.0) - aantal
+            elif tx.type == "correctie":
+                oud   = qty.get(tx.ticker, 0.0)
+                koers = laatste_koers.get(tx.ticker) or (naar_eur(prijs, v, wisselkoersen) or 0.0)
+                flow_d += (aantal - oud) * koers
+                qty[tx.ticker] = aantal
+
+        holdings = sum(qty.get(t, 0.0) * laatste_koers[t]
+                       for t in gedekt if t in laatste_koers)
+        navs.append(holdings)
+        flows.append(flow_d)
+
+    # Start bij de eerste dag met holdings.
+    eerste = next((i for i, v in enumerate(navs) if v and v > 0), None)
+    if eerste is None or len(navs) - eerste < 2:
+        return {"dekking": len(gedekt), "totaal_holdings": len(aandeel_tickers),
+                "te_weinig_data": True}
+    navs, flows, dgrid = navs[eerste:], flows[eerste:], grid[eerste:]
+    cum = twr(navs, flows)
+    if cum is None:
+        return {"dekking": len(gedekt), "totaal_holdings": len(aandeel_tickers),
+                "te_weinig_data": True}
+    dagen = max((dgrid[-1] - dgrid[0]).days, 1)
+    return {
+        "cumulatief":      cum,
+        "geannualiseerd":  annualiseer(cum, dagen),
+        "dagen":           len(navs),
+        "dekking":         len(gedekt),
+        "totaal_holdings": len(aandeel_tickers),
+        "te_weinig_data":  False,
+    }
+
+
 @app.route("/gebruiker/<int:gebruiker_id>/analyse")
 def analyse(gebruiker_id):
     gebruiker = Gebruiker.query.get_or_404(gebruiker_id)
     koersen, bijgewerkt, wisselkoersen = laad_prijzen()
     accounts = (BrokerAccount.query.filter_by(gebruiker_id=gebruiker_id)
-                .options(selectinload(BrokerAccount.posities)).all())
+                .options(selectinload(BrokerAccount.posities),
+                         selectinload(BrokerAccount.transacties)).all())
 
     # Huidige EUR-waarde + aantal per ticker, geaggregeerd over accounts.
     waarde_per_ticker = {}
@@ -495,6 +603,7 @@ def analyse(gebruiker_id):
             flags.append(f"Sector '{s['label']}' is {s['pct']:.0f}% (>40%).")
 
     risico = _portefeuille_risico([(t, a) for t, a in aantal_per_ticker.items()])
+    twr_res = _portefeuille_twr(accounts)
 
     return render_template(
         "analyse.html",
@@ -509,6 +618,8 @@ def analyse(gebruiker_id):
         effectief        = effectief,
         flags            = flags,
         risico           = risico,
+        twr              = twr_res,
+        rf               = RISICOVRIJE_RENTE,
         heeft_fundamentals = bool(funds),
     )
 
@@ -985,6 +1096,37 @@ def tag_verwijderen(gebruiker_id, tag_id):
     return redirect(url_for("tags_overzicht", gebruiker_id=gebruiker_id))
 
 
+# ── Volglijst (kandidaten voor advies) ────────────────────────────
+
+@app.route("/gebruiker/<int:gebruiker_id>/volglijst/toevoegen", methods=["POST"])
+def volglijst_toevoegen(gebruiker_id):
+    Gebruiker.query.get_or_404(gebruiker_id)
+    ticker  = request.form.get("ticker", "").strip().upper()
+    notitie = request.form.get("notitie", "").strip()[:200] or None
+    if not ticker:
+        flash("Ticker is verplicht.", "danger")
+    elif Volglijst.query.filter_by(gebruiker_id=gebruiker_id, ticker=ticker).first():
+        flash(f"{ticker} staat al op je volglijst.", "warning")
+    else:
+        db.session.add(Volglijst(gebruiker_id=gebruiker_id, ticker=ticker, notitie=notitie))
+        db.session.commit()
+        flash(f"{ticker} toegevoegd aan de volglijst.", "success")
+    return redirect(url_for("advies", gebruiker_id=gebruiker_id))
+
+
+@app.route("/gebruiker/<int:gebruiker_id>/volglijst/<int:item_id>/verwijderen", methods=["POST"])
+def volglijst_verwijderen(gebruiker_id, item_id):
+    item = Volglijst.query.get_or_404(item_id)
+    if item.gebruiker_id != gebruiker_id:
+        flash("Niet geautoriseerd.", "danger")
+        return redirect(url_for("advies", gebruiker_id=gebruiker_id))
+    ticker = item.ticker
+    db.session.delete(item)
+    db.session.commit()
+    flash(f"{ticker} van de volglijst verwijderd.", "info")
+    return redirect(url_for("advies", gebruiker_id=gebruiker_id))
+
+
 # ── Achtergrondtaken (verversen koersen/nieuws/advies) ────────────
 # Verversingen draaien in een achtergrond-thread zodat het HTTP-verzoek niet
 # tot 120s blijft hangen. De status wordt in-memory bijgehouden; de frontend
@@ -1219,6 +1361,13 @@ def advies(gebruiker_id):
             if len(bucket) < 5:
                 bucket.append(art)
 
+    # Volglijst + (gecachte) fundamentals van de kandidaten
+    volg = (Volglijst.query.filter_by(gebruiker_id=gebruiker_id)
+            .order_by(Volglijst.ticker).all())
+    volg_funds = {f.ticker: f for f in Fundamental.query
+                  .filter(Fundamental.ticker.in_([v.ticker for v in volg] or [""])).all()}
+    volglijst = [{"item": v, "fund": volg_funds.get(v.ticker)} for v in volg]
+
     return render_template(
         "advies.html",
         gebruiker      = gebruiker,
@@ -1229,6 +1378,7 @@ def advies(gebruiker_id):
         waarde_serie   = waarde_serie,
         tips_prestatie = tips_prestatie,
         ticker_nieuws  = ticker_nieuws,
+        volglijst      = volglijst,
         heeft_api_key  = bool(os.environ.get("ANTHROPIC_API_KEY")),
     )
 

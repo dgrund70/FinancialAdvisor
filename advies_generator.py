@@ -182,6 +182,21 @@ def laad_fundamentals(tickers=None):
     return res
 
 
+def laad_volglijst(gebruiker_id):
+    """Tickers op de volglijst van een gebruiker (kandidaten voor nieuwe posities)."""
+    conn = sqlite3.connect(DB_PATH, timeout=10)
+    try:
+        try:
+            rows = conn.execute(
+                "SELECT ticker FROM volglijst WHERE gebruiker_id = ? ORDER BY ticker",
+                (gebruiker_id,)).fetchall()
+        except sqlite3.OperationalError:
+            return []
+        return [r[0] for r in rows]
+    finally:
+        conn.close()
+
+
 def _kort_bedrag(n):
     for grens, suffix in ((1e12, "T"), (1e9, "mld"), (1e6, "mln")):
         if abs(n) >= grens:
@@ -228,7 +243,7 @@ def _format_fundamental(ticker, f):
 # ── Prompt bouwen ─────────────────────────────────────────────────
 
 def bouw_context(posities, koersen, wisselkoersen, macro, ticker_nieuws,
-                 fundamentals=None, tag_naam=None):
+                 fundamentals=None, kandidaten=None, tag_naam=None):
     """
     Bouw de context-string voor de prompt.
     posities = lijst van (ticker, naam, aantal, aankoopprijs, aankoopdatum,
@@ -298,6 +313,15 @@ def bouw_context(posities, koersen, wisselkoersen, macro, ticker_nieuws,
             regels.append("\n## Fundamentals per positie (bron: yfinance)")
             regels.extend(fund_regels)
 
+    if kandidaten:
+        kand_regels = []
+        for ticker, f in kandidaten.items():
+            regel = _format_fundamental(ticker, f) if f else None
+            kand_regels.append(regel or f"- **{ticker}**: (nog geen fundamentals gecachet)")
+        if kand_regels:
+            regels.append("\n## Volglijst — kandidaten voor nieuwe posities (bron: yfinance)")
+            regels.extend(kand_regels)
+
     if macro:
         regels.append("\n## Macro-omgeving")
         for naam, waarde in macro.items():
@@ -347,9 +371,10 @@ def bouw_prompt(context, tag_naam=None):
         "analisten-koersdoel) waar beschikbaar, plus nieuws en macro. Verwijs naar de "
         "concrete cijfers; verzin geen getallen die niet in de context staan.\n\n"
         "## Nieuwe kansen\n"
-        "3–5 concrete nieuwe posities of sectoren die nu interessant zijn. Geef per suggestie: "
-        "ticker, waarom nu (onderbouw met waardering/groei waar je die kent), en hoe het de "
-        "portefeuille aanvult.\n\n"
+        "Als er een **volglijst** met kandidaten is meegegeven, beoordeel die eerst expliciet "
+        "(kopen / afwachten, onderbouwd met hun fundamentals). Vul daarna aan tot 3–5 concrete "
+        "nieuwe posities of sectoren. Geef per suggestie: ticker, waarom nu (onderbouw met "
+        "waardering/groei waar je die kent), en hoe het de portefeuille aanvult.\n\n"
         "## Risico's\n"
         "Concrete risico's voor deze specifieke portefeuille.\n\n"
         "## Macro & Geopolitiek\n"
@@ -438,9 +463,15 @@ def genereer(gebruiker_id, tag_id=None):
     fundamentals = laad_fundamentals(tickers=relevante_tickers)
     print(f"  fundamentals beschikbaar voor {len(fundamentals)} tickers")
 
+    kandidaat_tickers = laad_volglijst(gebruiker_id)
+    kandidaat_funds   = laad_fundamentals(tickers=set(kandidaat_tickers)) if kandidaat_tickers else {}
+    kandidaten        = {t: kandidaat_funds.get(t) for t in kandidaat_tickers}
+    if kandidaat_tickers:
+        print(f"  volglijst: {len(kandidaat_tickers)} kandidaten")
+
     context, totaal_waarde, totaal_kosten = bouw_context(
         posities, koersen, wisselkoersen, macro, ticker_nieuws,
-        fundamentals=fundamentals, tag_naam=tag_naam
+        fundamentals=fundamentals, kandidaten=kandidaten, tag_naam=tag_naam
     )
 
     snapshot = json.dumps({

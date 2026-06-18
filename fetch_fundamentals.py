@@ -43,13 +43,21 @@ _NUMERIEK = {"markt_kap", "pe", "forward_pe", "koers_boekwaarde", "dividend_rend
 
 
 def get_live_tickers(conn):
+    """Live-positie-tickers + volglijst-kandidaten (beide krijgen fundamentals)."""
+    tickers = set()
     try:
         rows = conn.execute(
             "SELECT DISTINCT ticker FROM posities WHERE koers_type='live' AND aantal > 0"
         ).fetchall()
+        tickers |= {r[0] for r in rows if r[0]}
     except sqlite3.OperationalError:
-        return set()
-    return {r[0] for r in rows if r[0]}
+        pass
+    try:
+        rows = conn.execute("SELECT DISTINCT ticker FROM volglijst").fetchall()
+        tickers |= {r[0] for r in rows if r[0]}
+    except sqlite3.OperationalError:
+        pass
+    return tickers
 
 
 def _coerce(kolom, waarde):

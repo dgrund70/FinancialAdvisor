@@ -50,6 +50,63 @@
   </div>
 </div>
 
+{# ── Volglijst (kandidaten voor het advies) ────────────────────── #}
+<div class="card border-0 shadow-sm mb-4">
+  <div class="card-header bg-white border-bottom py-3">
+    <h6 class="mb-0 fw-semibold">
+      <i class="bi bi-bookmark-star me-2 text-warning"></i>Volglijst
+      <span class="text-muted fw-normal small">· kandidaten die het advies meeweegt bij "Nieuwe kansen"</span>
+    </h6>
+  </div>
+  <div class="card-body">
+    {% if volglijst %}
+    <div class="table-responsive mb-3">
+      <table class="table table-sm table-hover align-middle mb-0">
+        <thead class="table-light">
+          <tr><th>Ticker</th><th class="d-none d-md-table-cell">Fundamentals</th><th></th></tr>
+        </thead>
+        <tbody>
+          {% for v in volglijst %}
+          <tr>
+            <td class="fw-semibold">{{ v.item.ticker }}
+              {% if v.item.notitie %}<div class="text-muted small fw-normal">{{ v.item.notitie }}</div>{% endif %}
+            </td>
+            <td class="d-none d-md-table-cell text-muted small">
+              {% if v.fund and v.fund.sector %}{{ v.fund.sector }}{% if v.fund.pe %} · K/W {{ "%.1f"|format(v.fund.pe) }}{% endif %}{% if v.fund.aanbeveling %} · {{ v.fund.aanbeveling }}{% endif %}
+              {% else %}<span class="fst-italic">nog geen fundamentals — klik "Ververs fundamentals"</span>{% endif %}
+            </td>
+            <td class="text-end">
+              <form method="post"
+                    action="{{ url_for('volglijst_verwijderen', gebruiker_id=gebruiker.id, item_id=v.item.id) }}"
+                    onsubmit="return confirm('{{ v.item.ticker }} van de volglijst verwijderen?')">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <button class="btn btn-link btn-sm text-danger p-0" title="Verwijder"><i class="bi bi-trash3"></i></button>
+              </form>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <p class="text-muted small mb-3">Nog geen kandidaten. Voeg tickers toe die je overweegt; het advies beoordeelt ze met echte fundamentals.</p>
+    {% endif %}
+    <form method="post" action="{{ url_for('volglijst_toevoegen', gebruiker_id=gebruiker.id) }}" class="row g-2">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <div class="col-6 col-sm-3">
+        <input type="text" class="form-control text-uppercase" name="ticker"
+               placeholder="bijv. ASML.AS" required>
+      </div>
+      <div class="col">
+        <input type="text" class="form-control" name="notitie" placeholder="Notitie (optioneel)" maxlength="200">
+      </div>
+      <div class="col-auto">
+        <button class="btn btn-outline-primary"><i class="bi bi-plus-lg me-1"></i>Toevoegen</button>
+      </div>
+    </form>
+  </div>
+</div>
+
 {# ── Waardeontwikkeling grafiek ────────────────────────────────── #}
 {% if waarde_serie and waarde_serie | length > 0 %}
 <div class="card border-0 shadow-sm mb-4">

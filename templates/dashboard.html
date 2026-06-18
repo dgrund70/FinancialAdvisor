@@ -47,7 +47,7 @@
 
 <div class="row g-3 mb-4">
 
-  <div class="col-12 col-sm-4">
+  <div class="col-6 col-lg-3">
     <div class="card h-100 border-0 shadow-sm">
       <div class="card-body">
         <p class="text-muted small mb-1"><i class="bi bi-cash-stack me-1"></i>Gerealiseerd rendement</p>
@@ -58,7 +58,7 @@
     </div>
   </div>
 
-  <div class="col-12 col-sm-4">
+  <div class="col-6 col-lg-3">
     <div class="card h-100 border-0 shadow-sm">
       <div class="card-body">
         <p class="text-muted small mb-1"><i class="bi bi-cash-coin me-1"></i>Cash (totaal)</p>
@@ -67,11 +67,21 @@
     </div>
   </div>
 
-  <div class="col-12 col-sm-4">
+  <div class="col-6 col-lg-3">
     <div class="card h-100 border-0 shadow-sm">
       <div class="card-body">
         <p class="text-muted small mb-1"><i class="bi bi-graph-up-arrow me-1"></i>Rendement (XIRR)</p>
         <h4 class="fw-bold mb-0 {{ kleur(totaal.xirr) }}">{{ xirr_fmt(totaal.xirr) }}</h4>
+      </div>
+    </div>
+  </div>
+
+  <div class="col-6 col-lg-3">
+    <div class="card h-100 border-0 shadow-sm">
+      <div class="card-body">
+        <p class="text-muted small mb-1"><i class="bi bi-graph-up me-1"></i>Rendement (TWR, jaar)</p>
+        <h4 class="fw-bold mb-0 {{ kleur(totaal.twr) }}">{{ xirr_fmt(totaal.twr) }}</h4>
+        {% if totaal.twr is none %}<small class="text-muted">ververs risico-data op Analyse</small>{% endif %}
       </div>
     </div>
   </div>
