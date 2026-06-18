@@ -1,0 +1,14 @@
+{# Herbruikbaar ⓘ-uitlegicoon. Vereist de globale `begrippen` (context-processor)
+   en een Bootstrap-popover-init in base.html. Importeer met:
+   {% from "macros.html" import uitleg with context %} #}
+{% macro uitleg(sleutel) %}
+{%- set b = begrippen.get(sleutel) if begrippen else none -%}
+{%- if b -%}
+<a tabindex="0" role="button" class="text-muted text-decoration-none ms-1 align-baseline"
+   data-bs-toggle="popover" data-bs-trigger="focus" data-bs-placement="top"
+   data-bs-title="{{ b.titel }}" data-bs-content="{{ b.uitleg }}"
+   aria-label="Uitleg: {{ b.titel }}">
+  <i class="bi bi-info-circle small"></i>
+</a>
+{%- endif -%}
+{% endmacro %}

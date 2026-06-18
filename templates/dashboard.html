@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "macros.html" import uitleg with context %}
 {% block content %}
 
 {# ── Macro's ──────────────────────────────────────────────────── #}
@@ -15,7 +16,7 @@
   <div class="col-12 col-sm-4">
     <div class="card h-100 border-0 shadow-sm">
       <div class="card-body">
-        <p class="text-muted small mb-1"><i class="bi bi-wallet2 me-1"></i>Totale waarde</p>
+        <p class="text-muted small mb-1"><i class="bi bi-wallet2 me-1"></i>Totale waarde{{ uitleg('waarde') }}</p>
         <h4 class="fw-bold mb-0">{{ eur(totaal.waarde) }}</h4>
       </div>
     </div>
@@ -24,7 +25,7 @@
   <div class="col-12 col-sm-4">
     <div class="card h-100 border-0 shadow-sm">
       <div class="card-body">
-        <p class="text-muted small mb-1"><i class="bi bi-clock-history me-1"></i>Dag rendement</p>
+        <p class="text-muted small mb-1"><i class="bi bi-clock-history me-1"></i>Dag rendement{{ uitleg('dag') }}</p>
         <h4 class="fw-bold mb-0 {{ kleur(totaal.dag) }}">
           {{ teken(totaal.dag) }}{{ eur(totaal.dag) }}
         </h4>
@@ -35,7 +36,7 @@
   <div class="col-12 col-sm-4">
     <div class="card h-100 border-0 shadow-sm">
       <div class="card-body">
-        <p class="text-muted small mb-1"><i class="bi bi-bar-chart-line me-1"></i>Ongerealiseerd rendement</p>
+        <p class="text-muted small mb-1"><i class="bi bi-bar-chart-line me-1"></i>Ongerealiseerd rendement{{ uitleg('ongerealiseerd') }}</p>
         <h4 class="fw-bold mb-0 {{ kleur(totaal.winst) }}">
           {{ teken(totaal.winst) }}{{ eur(totaal.winst) }}
         </h4>
@@ -50,7 +51,7 @@
   <div class="col-6 col-lg-3">
     <div class="card h-100 border-0 shadow-sm">
       <div class="card-body">
-        <p class="text-muted small mb-1"><i class="bi bi-cash-stack me-1"></i>Gerealiseerd rendement</p>
+        <p class="text-muted small mb-1"><i class="bi bi-cash-stack me-1"></i>Gerealiseerd rendement{{ uitleg('gerealiseerd') }}</p>
         <h4 class="fw-bold mb-0 {{ kleur(totaal.gerealiseerd) }}">
           {{ teken(totaal.gerealiseerd) }}{{ eur(totaal.gerealiseerd) }}
         </h4>
@@ -61,7 +62,7 @@
   <div class="col-6 col-lg-3">
     <div class="card h-100 border-0 shadow-sm">
       <div class="card-body">
-        <p class="text-muted small mb-1"><i class="bi bi-cash-coin me-1"></i>Cash (totaal)</p>
+        <p class="text-muted small mb-1"><i class="bi bi-cash-coin me-1"></i>Cash (totaal){{ uitleg('cash') }}</p>
         <h4 class="fw-bold mb-0">{{ eur(totaal.cash_eur) }}</h4>
       </div>
     </div>
@@ -70,7 +71,7 @@
   <div class="col-6 col-lg-3">
     <div class="card h-100 border-0 shadow-sm">
       <div class="card-body">
-        <p class="text-muted small mb-1"><i class="bi bi-graph-up-arrow me-1"></i>Rendement (XIRR)</p>
+        <p class="text-muted small mb-1"><i class="bi bi-graph-up-arrow me-1"></i>Rendement (XIRR){{ uitleg('xirr') }}</p>
         <h4 class="fw-bold mb-0 {{ kleur(totaal.xirr) }}">{{ xirr_fmt(totaal.xirr) }}</h4>
       </div>
     </div>
@@ -79,7 +80,7 @@
   <div class="col-6 col-lg-3">
     <div class="card h-100 border-0 shadow-sm">
       <div class="card-body">
-        <p class="text-muted small mb-1"><i class="bi bi-graph-up me-1"></i>Rendement (TWR, jaar)</p>
+        <p class="text-muted small mb-1"><i class="bi bi-graph-up me-1"></i>Rendement (TWR, jaar){{ uitleg('twr') }}</p>
         <h4 class="fw-bold mb-0 {{ kleur(totaal.twr) }}">{{ xirr_fmt(totaal.twr) }}</h4>
         {% if totaal.twr is none %}<small class="text-muted">ververs risico-data op Analyse</small>{% endif %}
       </div>
@@ -119,7 +120,7 @@
 <div class="card border-0 shadow-sm mb-4">
   <div class="card-header bg-white border-bottom py-3">
     <h6 class="mb-0 fw-semibold">
-      <i class="bi bi-trophy me-2 text-warning"></i>Benchmarkvergelijking
+      <i class="bi bi-trophy me-2 text-warning"></i>Benchmarkvergelijking{{ uitleg('benchmark') }}
       <span class="text-muted fw-normal small">· jouw stortingen, belegd in de index (XIRR)</span>
     </h6>
   </div>

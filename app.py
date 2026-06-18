@@ -102,6 +102,50 @@ def inject_gebruikers():
     return {"alle_gebruikers": Gebruiker.query.order_by(Gebruiker.naam).all()}
 
 
+# Plain-Nederlandse uitleg per begrip, getoond via een ⓘ-icoon (uitleg-macro).
+# Eén plek om de teksten te onderhouden; elke uitleg: (1) wat het is, (2) wat je eraan hebt.
+BEGRIPPEN = {
+    "waarde":        {"titel": "Totale waarde",
+                      "uitleg": "De actuele marktwaarde van al je posities samen. Dit is wat je portefeuille nu waard zou zijn bij verkoop tegen de huidige koersen."},
+    "dag":           {"titel": "Dag rendement",
+                      "uitleg": "De winst of het verlies van vandaag, in euro. Korte-termijn beweging — leuk om te zien, maar het zegt weinig over je echte rendement."},
+    "ongerealiseerd":{"titel": "Ongerealiseerd rendement",
+                      "uitleg": "De papieren winst/verlies op posities die je nóg hebt (huidige waarde min inleg). 'Ongerealiseerd' = nog niet verkocht, dus het kan nog veranderen."},
+    "gerealiseerd":  {"titel": "Gerealiseerd rendement",
+                      "uitleg": "De winst/verlies die je écht hebt vastgeklikt door te verkopen. Dit staat vast en beweegt niet meer mee met de koers."},
+    "cash":          {"titel": "Cash (totaal)",
+                      "uitleg": "Het geld op je rekening dat nog niet belegd is, omgerekend naar euro. Zo zie je hoeveel je nog kunt inleggen; staat het negatief, dan zijn er aankopen geboekt zonder dat je stortingen hebt vastgelegd."},
+    "xirr":          {"titel": "Rendement (XIRR)",
+                      "uitleg": "Je geld-gewogen rendement: het houdt rekening met hoeveel je inlegde én wanneer. Verschijnt zodra je stortingen hebt geboekt; '—' betekent dat die nog ontbreken."},
+    "twr":           {"titel": "Rendement (TWR)",
+                      "uitleg": "Tijd-gewogen rendement: hoe goed je beleggingen presteerden, los van de timing van je stortingen — de eerlijke maatstaf om je met een index te vergelijken. Op jaarbasis, dus over een korte periode kan het fors oogen."},
+    "benchmark":     {"titel": "Benchmarkvergelijking",
+                      "uitleg": "Wat je had gehad als je dezelfde stortingen in een index (bv. MSCI World) had gedaan. Δ positief = jij deed het beter dan de index."},
+    "volatiliteit":  {"titel": "Volatiliteit",
+                      "uitleg": "Hoe sterk de waarde schommelt, op jaarbasis. Hoger = grilliger; het zegt iets over risico, niet over rendement."},
+    "max_drawdown":  {"titel": "Max drawdown",
+                      "uitleg": "De grootste daling van top naar dal in de gemeten periode. Geeft een gevoel van hoe diep je portefeuille tijdelijk kan wegzakken."},
+    "sharpe":        {"titel": "Sharpe-ratio",
+                      "uitleg": "Rendement per eenheid risico (na aftrek van een veilige rente). Hoger is beter; als vuistregel is onder 1 mager en boven 1 goed."},
+    "beta":          {"titel": "Bèta",
+                      "uitleg": "Hoe hard je portefeuille meebeweegt met de wereldindex. 1 = beweegt gelijk op, boven 1 = beweeglijker, onder 1 = rustiger."},
+    "concentratie":  {"titel": "Concentratie",
+                      "uitleg": "Hoe sterk je vermogen in een paar posities zit. 'Top 5' = aandeel van je vijf grootste; 'effectief aantal' = hoe gespreid je in de praktijk bent (lager = geconcentreerder)."},
+    "correlatie":    {"titel": "Correlatie",
+                      "uitleg": "In hoeverre twee posities samen bewegen (1 = identiek, 0 = los van elkaar, negatief = tegengesteld). Veel hoge correlaties betekent minder spreiding dan het lijkt."},
+    "gak":           {"titel": "GAK (aankoopprijs)",
+                      "uitleg": "Gemiddelde aankoopkoers per stuk: wat je gemiddeld betaalde. Samen met de huidige koers bepaalt dit je winst of verlies."},
+    "volglijst":     {"titel": "Volglijst",
+                      "uitleg": "Tickers die je overweegt te kopen. De adviesmodule beoordeelt ze met echte fundamentals als kandidaat voor nieuwe posities."},
+}
+
+
+@app.context_processor
+def inject_begrippen():
+    """Stel de begrippenlijst beschikbaar in alle templates (voor de uitleg-macro)."""
+    return {"begrippen": BEGRIPPEN}
+
+
 @app.template_filter("compact_float")
 def compact_float(value):
     if value is None:

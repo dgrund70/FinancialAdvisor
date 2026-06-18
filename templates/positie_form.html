@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "macros.html" import uitleg with context %}
 {% block content %}
 
 <div class="row justify-content-center">
@@ -55,7 +56,7 @@
                      value="{{ form_data.get('aantal', '') }}">
             </div>
             <div class="col-6">
-              <label for="aankoopprijs" class="form-label">GAK (aankoopprijs)</label>
+              <label for="aankoopprijs" class="form-label">GAK (aankoopprijs){{ uitleg('gak') }}</label>
               <input type="number" class="form-control" id="aankoopprijs" name="aankoopprijs"
                      step="any" min="0.000001" placeholder="150.00" required
                      value="{{ form_data.get('aankoopprijs', '') }}">

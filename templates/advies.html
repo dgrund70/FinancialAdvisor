@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "macros.html" import uitleg with context %}
 {% block content %}
 
 {# ── Risico-macro's (1=zeer defensief … 5=zeer offensief) ─────── #}
@@ -54,7 +55,7 @@
 <div class="card border-0 shadow-sm mb-4">
   <div class="card-header bg-white border-bottom py-3">
     <h6 class="mb-0 fw-semibold">
-      <i class="bi bi-bookmark-star me-2 text-warning"></i>Volglijst
+      <i class="bi bi-bookmark-star me-2 text-warning"></i>Volglijst{{ uitleg('volglijst') }}
       <span class="text-muted fw-normal small">· kandidaten die het advies meeweegt bij "Nieuwe kansen"</span>
     </h6>
   </div>

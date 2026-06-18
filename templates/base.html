@@ -89,6 +89,12 @@
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/js/bootstrap.bundle.min.js"
         integrity="sha384-FKyoEForCGlyvwx9Hj09JcYn3nv7wiPVlz7YYwJrWVcXK/BmnVDxM+D2scQbITxI" crossorigin="anonymous"></script>
 
+{# Activeer de ⓘ-uitlegpopovers (klik om te openen, klik ernaast om te sluiten). #}
+<script>
+  document.querySelectorAll('[data-bs-toggle="popover"]')
+    .forEach(function (el) { new bootstrap.Popover(el); });
+</script>
+
 {# Verversingen (koersen/nieuws/advies) draaien als achtergrondtaak: toon een
    spinner, poll de status en herlaad de pagina zodra de taak klaar is. #}
 <script>
