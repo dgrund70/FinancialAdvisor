@@ -4,14 +4,14 @@ After=network-online.target
 Wants=network-online.target
 
 [Service]
-# Pas User en de paden aan op jouw Pi (bv. gebruiker 'pi').
-User=pi
-WorkingDirectory=/home/pi/Investeren-en-beleggen
-EnvironmentFile=-/home/pi/Investeren-en-beleggen/.env
+# Ingesteld voor jouw Pi (gebruiker dgrund); pas aan als je pad/gebruiker anders is.
+User=dgrund
+WorkingDirectory=/home/dgrund/Investeren-en-beleggen
+EnvironmentFile=-/home/dgrund/Investeren-en-beleggen/.env
 Environment=PORT=5002
 # Eén worker: de "Ververs"-achtergrondtaken houden hun status in het geheugen bij.
 # --threads vangt gelijktijdige requests op. Bind op 0.0.0.0 = bereikbaar op het LAN.
-ExecStart=/home/pi/Investeren-en-beleggen/.venv/bin/gunicorn -w 1 --threads 4 --bind 0.0.0.0:5002 app:app
+ExecStart=/home/dgrund/Investeren-en-beleggen/.venv/bin/gunicorn -w 1 --threads 4 --bind 0.0.0.0:5002 app:app
 Restart=on-failure
 RestartSec=5
 

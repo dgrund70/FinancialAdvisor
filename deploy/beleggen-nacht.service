@@ -3,13 +3,13 @@ Description=Beleggingsdashboard — nachtelijke data (nieuws, fundamentals, hist
 
 [Service]
 Type=oneshot
-User=pi
-WorkingDirectory=/home/pi/Investeren-en-beleggen
-EnvironmentFile=-/home/pi/Investeren-en-beleggen/.env
+User=dgrund
+WorkingDirectory=/home/dgrund/Investeren-en-beleggen
+EnvironmentFile=-/home/dgrund/Investeren-en-beleggen/.env
 # Zwaardere fetches: extra beleefd én een geheugenplafond, zodat Nightwatch
 # nooit verdrongen wordt op een drukke Pi.
 Nice=15
 CPUWeight=10
 IOSchedulingClass=idle
 MemoryMax=512M
-ExecStart=/home/pi/Investeren-en-beleggen/deploy/update_nacht.sh
+ExecStart=/home/dgrund/Investeren-en-beleggen/deploy/update_nacht.sh

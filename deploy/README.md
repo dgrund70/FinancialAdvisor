@@ -54,7 +54,7 @@ cp .env.example .env && nano .env      # zet ANTHROPIC_API_KEY=...
 #   SECRET_KEY wordt automatisch aangemaakt in data/.
 
 # 6. (optioneel) portefeuille + caches meenemen van de Mac:
-#   draai op de MAC:  scp -r data/ pi@<pi-ip>:~/Investeren-en-beleggen/
+#   draai op de MAC:  scp -r data/ dgrund@<pi-ip>:~/Investeren-en-beleggen/
 
 # 7. Snelle test (handmatig), daarna Ctrl-C:
 HOST=0.0.0.0 .venv/bin/python app.py
@@ -64,7 +64,7 @@ HOST=0.0.0.0 .venv/bin/python app.py
 ### systemd inschakelen
 
 Pas in de vier `deploy/*.service`-bestanden `User=` en de paden aan jouw Pi aan
-(standaard staat er `pi` en `/home/pi/Investeren-en-beleggen`). Maak het script
+(standaard staat er `dgrund` en `/home/dgrund/Investeren-en-beleggen`). Maak het script
 uitvoerbaar en installeer de units:
 
 ```bash
