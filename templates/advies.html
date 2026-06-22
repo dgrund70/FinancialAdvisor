@@ -108,21 +108,6 @@
   </div>
 </div>
 
-{# ── Waardeontwikkeling grafiek ────────────────────────────────── #}
-{% if waarde_serie and waarde_serie | length > 0 %}
-<div class="card border-0 shadow-sm mb-4">
-  <div class="card-header bg-white border-bottom py-3">
-    <h6 class="mb-0 fw-semibold">
-      <i class="bi bi-graph-up me-2 text-success"></i>Waardeontwikkeling
-      <span class="text-muted fw-normal small">· laatste 14 dagen</span>
-    </h6>
-  </div>
-  <div class="card-body">
-    <canvas id="waardeChart" height="90"></canvas>
-  </div>
-</div>
-{% endif %}
-
 {# ── Prestatie advies-tips ─────────────────────────────────────── #}
 {% if tips_prestatie %}
 <div class="card border-0 shadow-sm mb-4">
@@ -347,55 +332,5 @@
 
   </div>
 </div>
-
-{% if waarde_serie and waarde_serie | length > 0 %}
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"
-        integrity="sha384-NrKB+u6Ts6AtkIhwPixiKTzgSKNblyhlk0Sohlgar9UHUBzai/sgnNNWWd291xqt"
-        crossorigin="anonymous"></script>
-<script>
-  const ws = {{ waarde_serie | tojson }};
-  const risicoKleur = { 1: "#198754", 2: "#198754", 3: "#ffc107", 4: "#dc3545", 5: "#dc3545" };
-  const risicoLabel = { 1: "Zeer defensief", 2: "Defensief", 3: "Neutraal", 4: "Offensief", 5: "Zeer offensief" };
-  const puntKleuren = ws.map(d => risicoKleur[d.risico] || "#adb5bd");
-  new Chart(document.getElementById("waardeChart"), {
-    type: "line",
-    data: {
-      labels: ws.map(d => d.datum),
-      datasets: [
-        {
-          label: "Portefeuillewaarde (€)",
-          data: ws.map(d => d.waarde),
-          borderColor: "#198754",
-          backgroundColor: "rgba(25,135,84,.10)",
-          fill: true, tension: .3,
-          pointRadius: 5, pointHoverRadius: 7,
-          pointBackgroundColor: puntKleuren, pointBorderColor: puntKleuren,
-        },
-        {
-          label: "Inleg / kostprijs (€)",
-          data: ws.map(d => d.kosten),
-          borderColor: "#adb5bd",
-          borderDash: [6, 4], fill: false, tension: 0, pointRadius: 0,
-        },
-      ],
-    },
-    options: {
-      responsive: true,
-      interaction: { mode: "index", intersect: false },
-      plugins: {
-        legend: { position: "bottom" },
-        tooltip: { callbacks: {
-          label: c => `${c.dataset.label}: €${(c.parsed.y ?? 0).toLocaleString("nl-NL")}`,
-          afterBody: items => {
-            const r = ws[items[0].dataIndex].risico;
-            return r ? `Risico: ${r}/5 · ${risicoLabel[r]}` : "Risico: niet bepaald";
-          },
-        } },
-      },
-      scales: { y: { ticks: { callback: v => "€" + v } } },
-    },
-  });
-</script>
-{% endif %}
 
 {% endblock %}

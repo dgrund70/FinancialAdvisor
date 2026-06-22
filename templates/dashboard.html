@@ -25,10 +25,13 @@
   <div class="col-12 col-sm-4">
     <div class="card h-100 border-0 shadow-sm">
       <div class="card-body">
-        <p class="text-muted small mb-1"><i class="bi bi-clock-history me-1"></i>Dag rendement{{ uitleg('dag') }}</p>
+        <p class="text-muted small mb-1"><i class="bi bi-clock-history me-1"></i>Dag P&amp;L{{ uitleg('dag') }}</p>
         <h4 class="fw-bold mb-0 {{ kleur(totaal.dag) }}">
           {{ teken(totaal.dag) }}{{ eur(totaal.dag) }}
         </h4>
+        {% if totaal.dag_pct is not none %}
+          <small class="{{ kleur(totaal.dag_pct) }} opacity-75">{{ pct(totaal.dag_pct) }}</small>
+        {% endif %}
       </div>
     </div>
   </div>
@@ -88,6 +91,21 @@
   </div>
 
 </div>
+
+{# ── Waardeontwikkeling grafiek ────────────────────────────────── #}
+{% if waarde_serie and waarde_serie | length > 1 %}
+<div class="card border-0 shadow-sm mb-4">
+  <div class="card-header bg-white border-bottom py-3">
+    <h6 class="mb-0 fw-semibold">
+      <i class="bi bi-graph-up me-2 text-success"></i>Waardeontwikkeling
+      <span class="text-muted fw-normal small">· gebaseerd op advies-snapshots</span>
+    </h6>
+  </div>
+  <div class="card-body">
+    <canvas id="waardeChart" height="80"></canvas>
+  </div>
+</div>
+{% endif %}
 
 {# ── Toolbar ───────────────────────────────────────────────────── #}
 <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
@@ -188,6 +206,10 @@
     </h6>
     <div class="d-flex gap-2 align-items-center">
       <span class="text-muted small">{{ d.rows | length }} positie{{ 's' if d.rows | length != 1 }}</span>
+      <a href="{{ url_for('transacties_overzicht', gebruiker_id=gebruiker.id, account_id=d.account.id) }}"
+         class="btn btn-outline-secondary btn-sm" title="Grootboek bekijken">
+        <i class="bi bi-journals me-1"></i>Grootboek
+      </a>
       <a href="{{ url_for('transactie_toevoegen', gebruiker_id=gebruiker.id, account_id=d.account.id) }}"
          class="btn btn-outline-secondary btn-sm">
         <i class="bi bi-journal-plus me-1"></i>Transactie
@@ -196,14 +218,25 @@
          class="btn btn-outline-primary btn-sm">
         <i class="bi bi-plus-lg me-1"></i>Positie
       </a>
-      <form method="post"
-            action="{{ url_for('account_verwijderen', gebruiker_id=gebruiker.id, account_id=d.account.id) }}"
-            onsubmit="return confirm('Account \'{{ d.account.naam }}\' en alle posities verwijderen?')">
-        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-        <button class="btn btn-outline-danger btn-sm" title="Account verwijderen">
-          <i class="bi bi-trash3"></i>
+      {# Account verwijderen: achter kebab-menu om per ongeluk klikken te voorkomen #}
+      <div class="dropdown">
+        <button class="btn btn-link btn-sm text-secondary p-1" data-bs-toggle="dropdown"
+                title="Meer opties" aria-expanded="false">
+          <i class="bi bi-three-dots-vertical"></i>
         </button>
-      </form>
+        <ul class="dropdown-menu dropdown-menu-end shadow-sm">
+          <li>
+            <form method="post"
+                  action="{{ url_for('account_verwijderen', gebruiker_id=gebruiker.id, account_id=d.account.id) }}"
+                  onsubmit="return confirm('Account \'{{ d.account.naam }}\' en alle posities verwijderen?\n\nDit kan niet ongedaan worden gemaakt.')">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              <button class="dropdown-item text-danger">
+                <i class="bi bi-trash3 me-2"></i>Account verwijderen…
+              </button>
+            </form>
+          </li>
+        </ul>
+      </div>
     </div>
   </div>
 
@@ -231,7 +264,8 @@
           <td class="fw-semibold">
             {{ r.pos.ticker }}
             {% if r.pos.koers_type == 'handmatig' %}
-              <span class="badge bg-light text-muted border ms-1" title="Handmatige koers">M</span>
+              <i class="bi bi-pencil-square text-muted ms-1 small"
+                 title="Handmatige koers — niet live bijgewerkt"></i>
             {% endif %}
           </td>
           <td class="text-muted small d-none d-md-table-cell">{{ r.pos.naam or '—' }}</td>
@@ -329,8 +363,6 @@
         <span class="text-muted">Rendement (XIRR):</span>
         <span class="{{ kleur(d.xirr) }} fw-semibold">{{ xirr_fmt(d.xirr) }}</span>
       {% endif %}
-      <a href="{{ url_for('transacties_overzicht', gebruiker_id=gebruiker.id, account_id=d.account.id) }}"
-         class="ms-3"><i class="bi bi-journals me-1"></i>Grootboek</a>
     </span>
   </div>
 </div>
@@ -353,5 +385,55 @@
     </form>
   </div>
 </div>
+
+{% if waarde_serie and waarde_serie | length > 1 %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"
+        integrity="sha384-NrKB+u6Ts6AtkIhwPixiKTzgSKNblyhlk0Sohlgar9UHUBzai/sgnNNWWd291xqt"
+        crossorigin="anonymous"></script>
+<script>
+  const ws = {{ waarde_serie | tojson }};
+  const risicoKleur = { 1: "#198754", 2: "#198754", 3: "#ffc107", 4: "#dc3545", 5: "#dc3545" };
+  const risicoLabel = { 1: "Zeer defensief", 2: "Defensief", 3: "Neutraal", 4: "Offensief", 5: "Zeer offensief" };
+  const puntKleuren = ws.map(d => risicoKleur[d.risico] || "#adb5bd");
+  new Chart(document.getElementById("waardeChart"), {
+    type: "line",
+    data: {
+      labels: ws.map(d => d.datum),
+      datasets: [
+        {
+          label: "Portefeuillewaarde (€)",
+          data: ws.map(d => d.waarde),
+          borderColor: "#198754",
+          backgroundColor: "rgba(25,135,84,.10)",
+          fill: true, tension: .3,
+          pointRadius: 5, pointHoverRadius: 7,
+          pointBackgroundColor: puntKleuren, pointBorderColor: puntKleuren,
+        },
+        {
+          label: "Inleg / kostprijs (€)",
+          data: ws.map(d => d.kosten),
+          borderColor: "#adb5bd",
+          borderDash: [6, 4], fill: false, tension: 0, pointRadius: 0,
+        },
+      ],
+    },
+    options: {
+      responsive: true,
+      interaction: { mode: "index", intersect: false },
+      plugins: {
+        legend: { position: "bottom" },
+        tooltip: { callbacks: {
+          label: c => `${c.dataset.label}: €${(c.parsed.y ?? 0).toLocaleString("nl-NL")}`,
+          afterBody: items => {
+            const r = ws[items[0].dataIndex].risico;
+            return r ? `Risico: ${r}/5 · ${risicoLabel[r]}` : "";
+          },
+        } },
+      },
+      scales: { y: { ticks: { callback: v => "€" + v.toLocaleString("nl-NL") } } },
+    },
+  });
+</script>
+{% endif %}
 
 {% endblock %}

@@ -292,6 +292,25 @@ def gebruiker_verwijderen(gebruiker_id):
     return redirect(url_for("index"))
 
 
+@app.route("/gebruiker/<int:gebruiker_id>/hernoemen", methods=["POST"])
+def gebruiker_hernoemen(gebruiker_id):
+    gebruiker = Gebruiker.query.get_or_404(gebruiker_id)
+    nieuwe_naam = request.form.get("naam", "").strip()
+    if not nieuwe_naam:
+        flash("Naam mag niet leeg zijn.", "danger")
+        return redirect(url_for("dashboard", gebruiker_id=gebruiker_id))
+    bezet = Gebruiker.query.filter(
+        Gebruiker.naam == nieuwe_naam, Gebruiker.id != gebruiker_id
+    ).first()
+    if bezet:
+        flash(f"Naam '{nieuwe_naam}' is al in gebruik.", "warning")
+        return redirect(url_for("dashboard", gebruiker_id=gebruiker_id))
+    gebruiker.naam = nieuwe_naam
+    db.session.commit()
+    flash(f"Naam gewijzigd naar '{nieuwe_naam}'.", "success")
+    return redirect(url_for("dashboard", gebruiker_id=gebruiker_id))
+
+
 # ── Dashboard ─────────────────────────────────────────────────────
 
 def _externe_flows(account, wisselkoersen):
@@ -422,6 +441,42 @@ def dashboard(gebruiker_id):
     grand_twr = (twr_res.get("geannualiseerd")
                  if twr_res and not twr_res.get("te_weinig_data") else None)
 
+    # Dagverandering %: dag_winst / (waarde_gisteren) = dag / (waarde - dag)
+    grand_vorig = (grand_waarde - grand_dag) if grand_has_prices else None
+    grand_dag_pct = (grand_dag / grand_vorig * 100
+                     if grand_has_prices and grand_vorig and abs(grand_vorig) > 0.01
+                     else None)
+
+    # Waardeontwikkelingsreeks voor grafiek (op basis van opgeslagen advies-snapshots)
+    grens_ws = datetime.now() - timedelta(days=30)
+    waarde_serie = []
+    for a in (Advies.query
+              .filter(Advies.gebruiker_id == gebruiker_id,
+                      Advies.tag_id == None,
+                      Advies.gegenereerd >= grens_ws)
+              .order_by(Advies.gegenereerd).all()):
+        try:
+            snap = json.loads(a.portfolio_snapshot)
+        except (ValueError, TypeError):
+            continue
+        waarde = snap.get("totaal_waarde")
+        kosten = snap.get("totaal_kosten")
+        if waarde is None or kosten is None:
+            w = k = 0.0
+            for p in snap.get("posities", []):
+                k += p["aantal"] * p["aankoopprijs"]
+                p_koers = koersen.get(p["ticker"], {}).get("koers")
+                if p_koers:
+                    w += p["aantal"] * p_koers
+            waarde = round(w, 2) if w else None
+            kosten = round(k, 2)
+        waarde_serie.append({
+            "datum":  a.gegenereerd.strftime("%d-%m %H:%M"),
+            "waarde": waarde,
+            "kosten": kosten,
+            "risico": a.risico_score,
+        })
+
     return render_template(
         "dashboard.html",
         gebruiker    = gebruiker,
@@ -430,6 +485,7 @@ def dashboard(gebruiker_id):
             "waarde":       grand_waarde if grand_has_prices else None,
             "winst":        (grand_waarde - grand_kosten) if grand_has_prices else None,
             "dag":          grand_dag if grand_has_prices else None,
+            "dag_pct":      grand_dag_pct,
             "gerealiseerd": grand_gerealiseerd,
             "cash_eur":     grand_cash_eur,
             "xirr":         grand_xirr,
@@ -439,6 +495,7 @@ def dashboard(gebruiker_id):
         benchmarks   = benchmarks,
         heeft_flows  = bool(grand_flows),
         bijgewerkt   = bijgewerkt,
+        waarde_serie = waarde_serie,
     )
 
 

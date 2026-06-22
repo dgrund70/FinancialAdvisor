@@ -32,16 +32,6 @@
 
 <div class="d-flex justify-content-between align-items-center mb-4 flex-wrap gap-2">
   <h5 class="mb-0 fw-semibold"><i class="bi bi-pie-chart me-2 text-primary"></i>Analyse</h5>
-  <div class="d-flex gap-2 flex-wrap">
-    <form method="post" action="{{ url_for('fundamentals_verversen', gebruiker_id=gebruiker.id) }}" data-taak>
-      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-      <button class="btn btn-outline-secondary btn-sm"><i class="bi bi-bar-chart-line me-1"></i>Ververs fundamentals</button>
-    </form>
-    <form method="post" action="{{ url_for('historie_verversen') }}" data-taak>
-      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-      <button class="btn btn-outline-secondary btn-sm"><i class="bi bi-activity me-1"></i>Ververs risico-data</button>
-    </form>
-  </div>
 </div>
 
 {% if totaal is none %}
@@ -51,14 +41,38 @@
 </div></div>
 {% else %}
 
-{# ── Risico & rendement ──────────────────────────────────────── #}
-<div class="row g-3 mb-2">
-  <div class="col-6 col-lg">
+{# ── Rendement ───────────────────────────────────────────────── #}
+<p class="text-uppercase text-muted small fw-semibold mb-2" style="letter-spacing:.05em">Rendement</p>
+<div class="row g-3 mb-3">
+  <div class="col-6 col-md-4 col-lg">
     <div class="card h-100 border-0 shadow-sm"><div class="card-body">
-      <p class="text-muted small mb-1"><i class="bi bi-graph-up me-1"></i>Rendement (TWR, jaar){{ uitleg('twr') }}</p>
+      <p class="text-muted small mb-1"><i class="bi bi-graph-up me-1"></i>TWR (geann.){{ uitleg('twr') }}</p>
       <h4 class="fw-bold mb-0">{% if twr and twr.geannualiseerd is not none %}{{ pct1(twr.geannualiseerd * 100) }}{% else %}—{% endif %}</h4>
+      {% if not twr or twr.te_weinig_data %}
+        <small class="text-muted">ververs risico-data</small>
+      {% endif %}
     </div></div>
   </div>
+  <div class="col-6 col-md-4 col-lg">
+    <div class="card h-100 border-0 shadow-sm"><div class="card-body">
+      <p class="text-muted small mb-1"><i class="bi bi-speedometer2 me-1"></i>Sharpe{{ uitleg('sharpe') }}</p>
+      <h4 class="fw-bold mb-0">{% if risico and risico.sharpe is not none %}{{ "%.2f"|format(risico.sharpe) }}{% else %}—{% endif %}</h4>
+      {% if risico and risico.sharpe is not none %}
+        <small class="text-muted">rf {{ pct1(rf * 100) }}</small>
+      {% endif %}
+    </div></div>
+  </div>
+</div>
+
+{# ── Risico ──────────────────────────────────────────────────── #}
+<div class="d-flex justify-content-between align-items-center mb-2 flex-wrap gap-2">
+  <p class="text-uppercase text-muted small fw-semibold mb-0" style="letter-spacing:.05em">Risico</p>
+  <form method="post" action="{{ url_for('historie_verversen') }}" data-taak>
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <button class="btn btn-outline-secondary btn-sm"><i class="bi bi-activity me-1"></i>Ververs risico-data</button>
+  </form>
+</div>
+<div class="row g-3 mb-2">
   <div class="col-6 col-lg">
     <div class="card h-100 border-0 shadow-sm"><div class="card-body">
       <p class="text-muted small mb-1"><i class="bi bi-activity me-1"></i>Volatiliteit (jaar){{ uitleg('volatiliteit') }}</p>
@@ -73,12 +87,6 @@
   </div>
   <div class="col-6 col-lg">
     <div class="card h-100 border-0 shadow-sm"><div class="card-body">
-      <p class="text-muted small mb-1"><i class="bi bi-speedometer2 me-1"></i>Sharpe (rf {{ pct1(rf * 100) }}){{ uitleg('sharpe') }}</p>
-      <h4 class="fw-bold mb-0">{% if risico and risico.sharpe is not none %}{{ "%.2f"|format(risico.sharpe) }}{% else %}—{% endif %}</h4>
-    </div></div>
-  </div>
-  <div class="col-6 col-lg">
-    <div class="card h-100 border-0 shadow-sm"><div class="card-body">
       <p class="text-muted small mb-1"><i class="bi bi-bezier2 me-1"></i>Beta vs MSCI World{{ uitleg('beta') }}</p>
       <h4 class="fw-bold mb-0">{% if risico and risico.beta is not none %}{{ "%.2f"|format(risico.beta) }}{% else %}—{% endif %}</h4>
     </div></div>
@@ -86,12 +94,12 @@
 </div>
 <p class="text-muted small mb-4">
   {% if not risico %}
-    Nog geen risico-data — klik op <strong>Ververs risico-data</strong>.
+    Nog geen risico-data beschikbaar.
   {% elif risico.te_weinig_data %}
-    Te weinig koershistorie ({{ risico.dekking }}/{{ risico.totaal_holdings }} holdings gedekt) — klik op <strong>Ververs risico-data</strong>.
+    Te weinig koershistorie ({{ risico.dekking }}/{{ risico.totaal_holdings }} holdings gedekt).
   {% else %}
-    O.b.v. {{ risico.dagen }} handelsdagen · {{ risico.dekking }}/{{ risico.totaal_holdings }} holdings gedekt · van het huidige mandje, FX naar EUR meegenomen.
-    TWR is tijd-gewogen (los van stortingstiming){% if twr and twr.dagen %} over {{ twr.dagen }} dagen{% endif %}; Sharpe = (jaarrendement − {{ pct1(rf * 100) }}) / volatiliteit.
+    O.b.v. {{ risico.dagen }} handelsdagen · {{ risico.dekking }}/{{ risico.totaal_holdings }} holdings gedekt · FX naar EUR meegenomen.
+    TWR is tijd-gewogen (los van stortingstiming){% if twr and twr.dagen %} over {{ twr.dagen }} dagen{% endif %}.
   {% endif %}
 </p>
 
@@ -130,6 +138,13 @@
 </div>
 
 {# ── Allocaties ──────────────────────────────────────────────── #}
+<div class="d-flex justify-content-between align-items-center mb-2 flex-wrap gap-2">
+  <p class="text-uppercase text-muted small fw-semibold mb-0" style="letter-spacing:.05em">Allocatie</p>
+  <form method="post" action="{{ url_for('fundamentals_verversen', gebruiker_id=gebruiker.id) }}" data-taak>
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <button class="btn btn-outline-secondary btn-sm"><i class="bi bi-bar-chart-line me-1"></i>Ververs fundamentals</button>
+  </form>
+</div>
 <div class="row g-3 mb-3">
   {{ alloc_card('Sector', 'bi-grid-1x2', sector_alloc, 'primary') }}
   {{ alloc_card('Type', 'bi-collection', type_alloc, 'success') }}
