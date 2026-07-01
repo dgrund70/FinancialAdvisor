@@ -61,6 +61,35 @@ journalctl -u beleggen -n 30 --no-pager                # logs controleren
 ## Conventies & valkuilen
 
 - **Geld naar EUR** loopt altijd via `helpers.naar_eur(bedrag, valuta, wisselkoersen)`; `wisselkoersen` komt uit `prijzen.json`. USD-koershistorie wordt in `fetch_historie.py` met historische FX naar EUR gezet.
+
+- **Cash-tekenconventie `Transactie`** (t.o.v. het accountsaldo):
+
+  | type       | veld dat het bedrag draagt     | teken  |
+  |------------|-------------------------------|--------|
+  | storting   | `bedrag`                      | +      |
+  | opname     | `bedrag`                      | −      |
+  | koop       | `aantal * prijs + kosten`     | −      |
+  | verkoop    | `aantal * prijs − kosten`     | +      |
+  | dividend   | `bedrag − kosten`             | +      |
+  | kosten     | `bedrag`                      | −      |
+  | correctie  | —                             | 0 (alleen her-baseline van aantal/GAK) |
+
+  `cash_saldi(account_id)` in `projectie.py` past deze conventie toe en geeft `{valuta: saldo}` terug.
+
+- **Koers-prioriteit in `bereken_posities()`:** `koers_type="handmatig"` (met `handmatige_koers`) overschrijft stil de live-koers uit `prijzen.json`. Bij een positie die niet in de marktwaarde-totalen verschijnt, controleer dit veld eerst.
+
 - **Begrippen-uitleg (ⓘ):** centrale `BEGRIPPEN`-dict in `app.py` (context-processor) + macro `uitleg('sleutel')` in `templates/macros.html` (`{% from "macros.html" import uitleg with context %}`); popovers worden in `base.html` geactiveerd.
-- **Tests** dekken de pure reken-logica (projectie/average-cost, XIRR, TWR, Sharpe, correlatie, benchmark) — draai ze na wijzigingen aan `helpers.py`/`projectie.py`. Fixture `app_ctx` in `tests/conftest.py` levert een lege tijdelijke SQLite-DB per test.
+
+- **`sharpe()` gebruikt `rf=0.025`** (2,5 % risicovrije rente, jaarbasis) als standaard. Pas aan in `helpers.py` als de marktrente wezenlijk wijzigt.
+
+- **Tests** dekken de pure reken-logica — draai ze na wijzigingen aan `helpers.py`/`projectie.py`:
+  - `test_projectie.py` — average-cost, GAK, gerealiseerde winst, `herbereken_alles()`
+  - `test_helpers_xirr.py` — XIRR-convergentie en edge cases
+  - `test_twr.py` — tijd-gewogen rendement
+  - `test_risico.py` / `test_risico_extra.py` — volatiliteit, max drawdown, beta, Sharpe, correlatie
+  - `test_benchmark.py` — deposit-matched benchmark
+  - `test_fundamentals.py` — fundamentals-parsing
+
+  Fixture `app_ctx` in `tests/conftest.py` levert een lege tijdelijke SQLite-DB per test.
+
 - Bij een nieuwe externe-data-feature: volg het data-fetch-patroon (cachetabel in `models.py` → `fetch_x.py` → achtergrond-route met `data-taak` of een systemd-timer in `deploy/`).
