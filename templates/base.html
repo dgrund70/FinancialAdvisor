@@ -14,29 +14,45 @@
 
 {% set uid = request.view_args.get('gebruiker_id') %}
 
-<nav class="navbar navbar-dark bg-dark">
-  <div class="container-lg d-flex align-items-center gap-4">
+<nav class="navbar navbar-dark bg-dark navbar-expand-md">
+  <div class="container-lg">
     <a class="navbar-brand fw-semibold" href="{{ url_for('index') }}">
       <i class="bi bi-graph-up-arrow me-2"></i>Beleggingsdashboard
     </a>
     {% if uid %}
-      <a class="nav-link text-white-50 {% if request.endpoint == 'dashboard' %}text-white{% endif %}"
-         href="{{ url_for('dashboard', gebruiker_id=uid) }}">
-        <i class="bi bi-briefcase me-1"></i>Portfolio
-      </a>
-      <a class="nav-link text-white-50 {% if 'advies' in (request.endpoint or '') %}text-white{% endif %}"
-         href="{{ url_for('advies', gebruiker_id=uid) }}">
-        <i class="bi bi-lightbulb me-1"></i>Advies
-      </a>
-      <a class="nav-link text-white-50 {% if request.endpoint == 'analyse' %}text-white{% endif %}"
-         href="{{ url_for('analyse', gebruiker_id=uid) }}">
-        <i class="bi bi-pie-chart me-1"></i>Analyse
-      </a>
-      <a class="nav-link text-white-50 {% if 'tag' in (request.endpoint or '') %}text-white{% endif %}"
-         href="{{ url_for('tags_overzicht', gebruiker_id=uid) }}">
-        <i class="bi bi-tags me-1"></i>Tags
-      </a>
-      <div class="dropdown ms-auto">
+    <button class="navbar-toggler border-0" type="button" data-bs-toggle="collapse"
+            data-bs-target="#navInhoud" aria-controls="navInhoud"
+            aria-expanded="false" aria-label="Navigatiemenu">
+      <span class="navbar-toggler-icon"></span>
+    </button>
+    <div class="collapse navbar-collapse" id="navInhoud">
+      <ul class="navbar-nav me-auto">
+        <li class="nav-item">
+          <a class="nav-link {% if request.endpoint == 'dashboard' %}active{% else %}text-white-50{% endif %}"
+             href="{{ url_for('dashboard', gebruiker_id=uid) }}">
+            <i class="bi bi-briefcase me-1"></i>Portfolio
+          </a>
+        </li>
+        <li class="nav-item">
+          <a class="nav-link {% if 'advies' in (request.endpoint or '') %}active{% else %}text-white-50{% endif %}"
+             href="{{ url_for('advies', gebruiker_id=uid) }}">
+            <i class="bi bi-lightbulb me-1"></i>Advies
+          </a>
+        </li>
+        <li class="nav-item">
+          <a class="nav-link {% if request.endpoint == 'analyse' %}active{% else %}text-white-50{% endif %}"
+             href="{{ url_for('analyse', gebruiker_id=uid) }}">
+            <i class="bi bi-pie-chart me-1"></i>Analyse
+          </a>
+        </li>
+        <li class="nav-item">
+          <a class="nav-link {% if 'tag' in (request.endpoint or '') %}active{% else %}text-white-50{% endif %}"
+             href="{{ url_for('tags_overzicht', gebruiker_id=uid) }}">
+            <i class="bi bi-tags me-1"></i>Tags
+          </a>
+        </li>
+      </ul>
+      <div class="dropdown">
         <button class="btn btn-sm btn-outline-light dropdown-toggle d-flex align-items-center gap-2"
                 type="button" data-bs-toggle="dropdown" aria-expanded="false">
           <i class="bi bi-person-circle"></i>
@@ -73,7 +89,7 @@
           </li>
           <li>
             <form method="post" action="{{ url_for('gebruiker_verwijderen', gebruiker_id=uid) }}"
-                  onsubmit="return confirm('Gebruiker \'{{ gebruiker.naam if gebruiker is defined else '' }}\' en ALLE bijbehorende accounts, posities, tags en adviezen verwijderen?\n\nDit kan niet ongedaan worden gemaakt.');">
+                  data-confirm="Gebruiker '{{ gebruiker.naam if gebruiker is defined else '' }}' en ALLE bijbehorende accounts, posities, tags en adviezen verwijderen? Dit kan niet ongedaan worden gemaakt.">
               <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
               <button type="submit" class="dropdown-item text-danger">
                 <i class="bi bi-trash3 me-2"></i>Deze gebruiker verwijderen…
@@ -82,16 +98,19 @@
           </li>
         </ul>
       </div>
+    </div>
     {% endif %}
   </div>
 </nav>
 
 <div class="container-lg py-4">
   {% with messages = get_flashed_messages(with_categories=true) %}
+    {% set _alert_icons = {'success': 'check-circle-fill', 'danger': 'exclamation-triangle-fill', 'warning': 'exclamation-circle-fill', 'info': 'info-circle-fill'} %}
     {% for cat, msg in messages %}
-      <div class="alert alert-{{ cat }} alert-dismissible fade show py-2" role="alert">
-        {{ msg }}
-        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+      <div class="alert alert-{{ cat }} alert-dismissible fade show py-2 d-flex align-items-center gap-2" role="alert">
+        <i class="bi bi-{{ _alert_icons.get(cat, 'info-circle-fill') }} flex-shrink-0"></i>
+        <span>{{ msg }}</span>
+        <button type="button" class="btn-close ms-auto" data-bs-dismiss="alert"></button>
       </div>
     {% endfor %}
   {% endwith %}
@@ -169,6 +188,47 @@
       });
     });
   });
+})();
+</script>
+
+{# ── Verwijder-bevestiging modal (herbruikbaar via data-confirm="...") ── #}
+<div class="modal fade" id="bevestigModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered modal-sm">
+    <div class="modal-content">
+      <div class="modal-header border-0 pb-1">
+        <h6 class="modal-title fw-semibold">
+          <i class="bi bi-exclamation-triangle-fill text-danger me-2"></i>Bevestigen
+        </h6>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Annuleren"></button>
+      </div>
+      <div class="modal-body pt-1 pb-2 small" id="bevestigModalTekst"></div>
+      <div class="modal-footer border-0 pt-0">
+        <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-dismiss="modal">Annuleren</button>
+        <button type="button" class="btn btn-danger btn-sm" id="bevestigModalOk">
+          <i class="bi bi-trash3 me-1"></i>Verwijderen
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+<script>
+(function () {
+  var modalEl = document.getElementById('bevestigModal');
+  var modal = modalEl ? new bootstrap.Modal(modalEl) : null;
+  var pendingForm = null;
+  if (modal) {
+    document.getElementById('bevestigModalOk').addEventListener('click', function () {
+      if (pendingForm) { modal.hide(); pendingForm.submit(); pendingForm = null; }
+    });
+  }
+  document.addEventListener('submit', function (e) {
+    var bericht = e.target.getAttribute('data-confirm');
+    if (!bericht || !modal) return;
+    e.preventDefault();
+    pendingForm = e.target;
+    document.getElementById('bevestigModalTekst').textContent = bericht;
+    modal.show();
+  }, true);
 })();
 </script>
 </body>

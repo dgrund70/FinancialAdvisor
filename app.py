@@ -437,7 +437,7 @@ def dashboard(gebruiker_id):
                   if grand_flows and (grand_has_prices or not heeft_open_globaal) else None)
     benchmarks = _benchmark_vergelijkingen(grand_flows)
 
-    twr_res = _portefeuille_twr(accounts)
+    twr_res = _portefeuille_twr(accounts, geef_serie=True)
     grand_twr = (twr_res.get("geannualiseerd")
                  if twr_res and not twr_res.get("te_weinig_data") else None)
 
@@ -447,35 +447,8 @@ def dashboard(gebruiker_id):
                      if grand_has_prices and grand_vorig and abs(grand_vorig) > 0.01
                      else None)
 
-    # Waardeontwikkelingsreeks voor grafiek (op basis van opgeslagen advies-snapshots)
-    grens_ws = datetime.now() - timedelta(days=30)
-    waarde_serie = []
-    for a in (Advies.query
-              .filter(Advies.gebruiker_id == gebruiker_id,
-                      Advies.tag_id == None,
-                      Advies.gegenereerd >= grens_ws)
-              .order_by(Advies.gegenereerd).all()):
-        try:
-            snap = json.loads(a.portfolio_snapshot)
-        except (ValueError, TypeError):
-            continue
-        waarde = snap.get("totaal_waarde")
-        kosten = snap.get("totaal_kosten")
-        if waarde is None or kosten is None:
-            w = k = 0.0
-            for p in snap.get("posities", []):
-                k += p["aantal"] * p["aankoopprijs"]
-                p_koers = koersen.get(p["ticker"], {}).get("koers")
-                if p_koers:
-                    w += p["aantal"] * p_koers
-            waarde = round(w, 2) if w else None
-            kosten = round(k, 2)
-        waarde_serie.append({
-            "datum":  a.gegenereerd.strftime("%d-%m %H:%M"),
-            "waarde": waarde,
-            "kosten": kosten,
-            "risico": a.risico_score,
-        })
+    # Waardeontwikkelingsreeks uit koers_historie + transacties (via _portefeuille_twr).
+    waarde_serie = twr_res.get("waarde_serie", []) if twr_res else []
 
     return render_template(
         "dashboard.html",
@@ -571,7 +544,7 @@ def _portefeuille_risico(holdings, benchmark_ticker="IWDA.AS", venster=252):
     return res
 
 
-def _portefeuille_twr(accounts, venster=400):
+def _portefeuille_twr(accounts, venster=400, geef_serie=False):
     """Tijd-gewogen rendement van de belegde holdings.
 
     Waardeert alleen de **holdings** (Σ qty·koers, EUR) per dag uit het grootboek
@@ -593,7 +566,8 @@ def _portefeuille_twr(accounts, venster=400):
         return {"dekking": 0, "totaal_holdings": len(aandeel_tickers), "te_weinig_data": True}
 
     serie = {t: dict(zip(hist[t][0], hist[t][1])) for t in gedekt}
-    grid  = sorted({d for t in gedekt for d in serie[t]})[-venster:]
+    grid_all = sorted({d for t in gedekt for d in serie[t]})
+    grid = grid_all if geef_serie else grid_all[-venster:]
     if len(grid) < 20:
         return {"dekking": len(gedekt), "totaal_holdings": len(aandeel_tickers),
                 "te_weinig_data": True}
@@ -653,7 +627,7 @@ def _portefeuille_twr(accounts, venster=400):
         return {"dekking": len(gedekt), "totaal_holdings": len(aandeel_tickers),
                 "te_weinig_data": True}
     dagen = max((dgrid[-1] - dgrid[0]).days, 1)
-    return {
+    res = {
         "cumulatief":      cum,
         "geannualiseerd":  annualiseer(cum, dagen),
         "dagen":           len(navs),
@@ -661,6 +635,19 @@ def _portefeuille_twr(accounts, venster=400):
         "totaal_holdings": len(aandeel_tickers),
         "te_weinig_data":  False,
     }
+    if geef_serie:
+        inleg_cum = 0.0
+        w_serie = []
+        for i, d in enumerate(dgrid):
+            inleg_cum += flows[i]
+            w_serie.append({
+                "ts":     d.isoformat(),
+                "datum":  d.strftime("%d-%m-%y"),
+                "waarde": round(navs[i], 2),
+                "kosten": round(inleg_cum, 2),
+            })
+        res["waarde_serie"] = w_serie
+    return res
 
 
 @app.route("/gebruiker/<int:gebruiker_id>/analyse")

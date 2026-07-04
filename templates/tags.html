@@ -25,9 +25,9 @@
           <form method="post"
                 action="{{ url_for('tag_verwijderen', gebruiker_id=gebruiker.id, tag_id=tag.id) }}"
                 class="ms-auto"
-                onsubmit="return confirm('Tag \'{{ tag.naam }}\' verwijderen?')">
+                data-confirm="Tag '{{ tag.naam }}' verwijderen?">
             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-            <button class="btn btn-link btn-sm text-danger p-0" title="Verwijder">
+            <button class="btn btn-link btn-sm text-danger p-1" title="Verwijder">
               <i class="bi bi-trash3"></i>
             </button>
           </form>

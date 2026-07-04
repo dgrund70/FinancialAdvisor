@@ -4,7 +4,7 @@
 
 {# ── Macro's ──────────────────────────────────────────────────── #}
 {% macro kleur(v) %}{{ 'pos' if v is not none and v > 0 else 'neg' if v is not none and v < 0 else 'text-muted' }}{% endmacro %}
-{% macro teken(v) %}{{ '+' if v is not none and v > 0 else '' }}{% endmacro %}
+{% macro teken(v) %}{% if v is not none and v > 0 %}<i class="bi bi-arrow-up-short"></i>+{% elif v is not none and v < 0 %}<i class="bi bi-arrow-down-short"></i>{% endif %}{% endmacro %}
 {% macro eur(v) %}{% if v is not none %}€&nbsp;{{ "%.2f"|format(v) }}{% else %}—{% endif %}{% endmacro %}
 {% macro geld(v, valuta) %}{% if v is none %}—{% elif not valuta or valuta == 'EUR' %}€&nbsp;{{ "%.2f"|format(v) }}{% else %}{{ "%.2f"|format(v) }}&nbsp;{{ valuta }}{% endif %}{% endmacro %}
 {% macro pct(v) %}{{ teken(v) }}{{ "%.2f"|format(v) }}%{% endmacro %}
@@ -14,10 +14,10 @@
 <div class="row g-3 mb-3">
 
   <div class="col-12 col-sm-4">
-    <div class="card h-100 border-0 shadow-sm">
+    <div class="card h-100 border-0 shadow-sm bg-primary bg-opacity-10">
       <div class="card-body">
         <p class="text-muted small mb-1"><i class="bi bi-wallet2 me-1"></i>Totale waarde{{ uitleg('waarde') }}</p>
-        <h4 class="fw-bold mb-0">{{ eur(totaal.waarde) }}</h4>
+        <h3 class="fw-bold mb-0">{{ eur(totaal.waarde) }}</h3>
       </div>
     </div>
   </div>
@@ -49,6 +49,15 @@
 
 </div>
 
+<div class="d-flex justify-content-end mb-2">
+  <button class="btn btn-link btn-sm text-muted p-0 collapse-toggle"
+          type="button" data-bs-toggle="collapse" data-bs-target="#analyticsPanel"
+          aria-expanded="false" aria-controls="analyticsPanel">
+    <i class="bi bi-chevron-down me-1"></i>Details
+  </button>
+</div>
+
+<div class="collapse" id="analyticsPanel">
 <div class="row g-3 mb-4">
 
   <div class="col-6 col-lg-3">
@@ -91,15 +100,23 @@
   </div>
 
 </div>
+</div>
 
 {# ── Waardeontwikkeling grafiek ────────────────────────────────── #}
 {% if waarde_serie and waarde_serie | length > 1 %}
 <div class="card border-0 shadow-sm mb-4">
-  <div class="card-header bg-white border-bottom py-3">
+  <div class="card-header bg-white border-bottom py-2 d-flex align-items-center justify-content-between flex-wrap gap-2">
     <h6 class="mb-0 fw-semibold">
       <i class="bi bi-graph-up me-2 text-success"></i>Waardeontwikkeling
       <span class="text-muted fw-normal small">· gebaseerd op advies-snapshots</span>
     </h6>
+    <div class="btn-group btn-group-sm" role="group" aria-label="Periode">
+      <button type="button" class="btn btn-outline-secondary" data-periode="14">2W</button>
+      <button type="button" class="btn btn-outline-secondary active" data-periode="30">1M</button>
+      <button type="button" class="btn btn-outline-secondary" data-periode="90">3M</button>
+      <button type="button" class="btn btn-outline-secondary" data-periode="180">6M</button>
+      <button type="button" class="btn btn-outline-secondary" data-periode="all">Alles</button>
+    </div>
   </div>
   <div class="card-body">
     <canvas id="waardeChart" height="80"></canvas>
@@ -228,7 +245,7 @@
           <li>
             <form method="post"
                   action="{{ url_for('account_verwijderen', gebruiker_id=gebruiker.id, account_id=d.account.id) }}"
-                  onsubmit="return confirm('Account \'{{ d.account.naam }}\' en alle posities verwijderen?\n\nDit kan niet ongedaan worden gemaakt.')">
+                  data-confirm="Account '{{ d.account.naam }}' en alle posities verwijderen? Dit kan niet ongedaan worden gemaakt.">
               <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
               <button class="dropdown-item text-danger">
                 <i class="bi bi-trash3 me-2"></i>Account verwijderen…
@@ -274,7 +291,7 @@
               <span class="badge bg-primary bg-opacity-10 text-primary border border-primary-subtle me-1">{{ tag.naam }}</span>
             {% endfor %}
             <a href="{{ url_for('positie_tags_bewerken', gebruiker_id=gebruiker.id, pos_id=r.pos.id) }}"
-               class="btn btn-link btn-sm p-0 text-muted" title="Tags bewerken">
+               class="btn btn-link btn-sm p-1 text-muted" title="Tags bewerken">
               <i class="bi bi-pencil-square"></i>
             </a>
           </td>
@@ -308,14 +325,14 @@
           <td class="text-end">
             <div class="d-inline-flex gap-2 align-items-center">
               <a href="{{ url_for('positie_bewerken', gebruiker_id=gebruiker.id, pos_id=r.pos.id) }}"
-                 class="btn btn-link btn-sm text-secondary p-0" title="Positie bewerken">
+                 class="btn btn-link btn-sm text-secondary p-1" title="Positie bewerken">
                 <i class="bi bi-pencil"></i>
               </a>
               <form method="post"
                     action="{{ url_for('positie_verwijderen', gebruiker_id=gebruiker.id, pos_id=r.pos.id) }}"
-                    onsubmit="return confirm('{{ r.pos.ticker }} verwijderen?')">
+                    data-confirm="{{ r.pos.ticker }} verwijderen?">
                 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                <button class="btn btn-link btn-sm text-danger p-0" title="Verwijder">
+                <button class="btn btn-link btn-sm text-danger p-1" title="Verwijder">
                   <i class="bi bi-trash3"></i>
                 </button>
               </form>
@@ -391,27 +408,33 @@
         integrity="sha384-NrKB+u6Ts6AtkIhwPixiKTzgSKNblyhlk0Sohlgar9UHUBzai/sgnNNWWd291xqt"
         crossorigin="anonymous"></script>
 <script>
-  const ws = {{ waarde_serie | tojson }};
-  const risicoKleur = { 1: "#198754", 2: "#198754", 3: "#ffc107", 4: "#dc3545", 5: "#dc3545" };
-  const risicoLabel = { 1: "Zeer defensief", 2: "Defensief", 3: "Neutraal", 4: "Offensief", 5: "Zeer offensief" };
-  const puntKleuren = ws.map(d => risicoKleur[d.risico] || "#adb5bd");
-  new Chart(document.getElementById("waardeChart"), {
+(function () {
+  const wsAll = {{ waarde_serie | tojson }};
+
+  function filterOp(dagen) {
+    if (!dagen) return wsAll;
+    const grens = Date.now() - dagen * 86400000;
+    return wsAll.filter(d => new Date(d.ts).getTime() >= grens);
+  }
+
+  let wsHuidig = filterOp(30);
+
+  const grafiek = new Chart(document.getElementById("waardeChart"), {
     type: "line",
     data: {
-      labels: ws.map(d => d.datum),
+      labels: wsHuidig.map(d => d.datum),
       datasets: [
         {
           label: "Portefeuillewaarde (€)",
-          data: ws.map(d => d.waarde),
+          data: wsHuidig.map(d => d.waarde),
           borderColor: "#198754",
           backgroundColor: "rgba(25,135,84,.10)",
           fill: true, tension: .3,
-          pointRadius: 5, pointHoverRadius: 7,
-          pointBackgroundColor: puntKleuren, pointBorderColor: puntKleuren,
+          pointRadius: 0, pointHoverRadius: 4,
         },
         {
-          label: "Inleg / kostprijs (€)",
-          data: ws.map(d => d.kosten),
+          label: "Inleg (cumulatief, €)",
+          data: wsHuidig.map(d => d.kosten),
           borderColor: "#adb5bd",
           borderDash: [6, 4], fill: false, tension: 0, pointRadius: 0,
         },
@@ -424,15 +447,25 @@
         legend: { position: "bottom" },
         tooltip: { callbacks: {
           label: c => `${c.dataset.label}: €${(c.parsed.y ?? 0).toLocaleString("nl-NL")}`,
-          afterBody: items => {
-            const r = ws[items[0].dataIndex].risico;
-            return r ? `Risico: ${r}/5 · ${risicoLabel[r]}` : "";
-          },
         } },
       },
       scales: { y: { ticks: { callback: v => "€" + v.toLocaleString("nl-NL") } } },
     },
   });
+
+  document.querySelectorAll('[data-periode]').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      const dagen = btn.dataset.periode === 'all' ? null : Number(btn.dataset.periode);
+      wsHuidig = filterOp(dagen);
+      grafiek.data.labels = wsHuidig.map(d => d.datum);
+      grafiek.data.datasets[0].data = wsHuidig.map(d => d.waarde);
+      grafiek.data.datasets[1].data = wsHuidig.map(d => d.kosten);
+      grafiek.update();
+      document.querySelectorAll('[data-periode]').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+    });
+  });
+})();
 </script>
 {% endif %}
 

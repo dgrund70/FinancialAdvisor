@@ -79,9 +79,9 @@
             <td class="text-end">
               <form method="post"
                     action="{{ url_for('volglijst_verwijderen', gebruiker_id=gebruiker.id, item_id=v.item.id) }}"
-                    onsubmit="return confirm('{{ v.item.ticker }} van de volglijst verwijderen?')">
+                    data-confirm="{{ v.item.ticker }} van de volglijst verwijderen?">
                 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                <button class="btn btn-link btn-sm text-danger p-0" title="Verwijder"><i class="bi bi-trash3"></i></button>
+                <button class="btn btn-link btn-sm text-danger p-1" title="Verwijder"><i class="bi bi-trash3"></i></button>
               </form>
             </td>
           </tr>

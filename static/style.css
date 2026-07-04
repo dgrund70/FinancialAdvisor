@@ -13,6 +13,10 @@ tfoot td { font-size: .9rem; }
 #ticker { text-transform: uppercase; }
 #ticker::placeholder { text-transform: none; }
 
+/* Collapse toggle — chevron rotates when open */
+.collapse-toggle .bi-chevron-down { transition: transform .2s ease; display: inline-block; }
+.collapse-toggle[aria-expanded="true"] .bi-chevron-down { transform: rotate(180deg); }
+
 /* Advies markdown rendering */
 .advies-tekst h2 { font-size: 1.1rem; font-weight: 700; margin-top: 1.2rem; }
 .advies-tekst h3 { font-size: 1rem;   font-weight: 600; margin-top: 1rem; }

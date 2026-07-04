@@ -61,12 +61,12 @@
           <td class="text-end">
             <div class="d-inline-flex gap-2 align-items-center">
               <a href="{{ url_for('transactie_bewerken', gebruiker_id=gebruiker.id, transactie_id=tx.id) }}"
-                 class="btn btn-link btn-sm text-secondary p-0" title="Bewerken"><i class="bi bi-pencil"></i></a>
+                 class="btn btn-link btn-sm text-secondary p-1" title="Bewerken"><i class="bi bi-pencil"></i></a>
               <form method="post"
                     action="{{ url_for('transactie_verwijderen', gebruiker_id=gebruiker.id, transactie_id=tx.id) }}"
-                    onsubmit="return confirm('Deze transactie verwijderen?')">
+                    data-confirm="Deze transactie verwijderen?">
                 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                <button class="btn btn-link btn-sm text-danger p-0" title="Verwijderen"><i class="bi bi-trash3"></i></button>
+                <button class="btn btn-link btn-sm text-danger p-1" title="Verwijderen"><i class="bi bi-trash3"></i></button>
               </form>
             </div>
           </td>
