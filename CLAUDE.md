@@ -56,7 +56,7 @@ journalctl -u beleggen -n 30 --no-pager                # logs controleren
 
 **Advies-pijplijn.** De `advies_genereer`-route start `advies_generator.py` als subprocess (Claude API, model `claude-sonnet-4-6`). Dat bouwt context uit portefeuille + macro + gecacht nieuws + fundamentals + `Volglijst` (kandidaat-tickers), vraagt een gestructureerd advies, parst de `RISICO:`/`TIPS:`-kopregels, valideert dat tip-tickers een echte koers hebben, en slaat `Advies` + `Aanbeveling` op. **Dit is het enige pad dat tokens/geld kost**; alle geplande fetches zijn gratis (Yahoo/CoinGecko). Vereist `ANTHROPIC_API_KEY` in `.env`.
 
-**Blootstelling.** Single-user, **bewust géén authenticatie**. Bind-host via env `HOST` (default `127.0.0.1`; `0.0.0.0` op het vertrouwde thuis-LAN op de Pi). `debug` staat uit tenzij `FLASK_DEBUG`. `SECRET_KEY`: env > `data/secret_key` > automatisch gegenereerd. `data/` (DB, caches, secret) staat in `.gitignore`.
+**Blootstelling.** Meerdere `Gebruiker`-profielen (`/gebruiker/<id>/...`), maar **bewust géén authenticatie/login** — wie toegang heeft tot de URL kan bij elk profiel. Bind-host via env `HOST` (default `127.0.0.1`; `0.0.0.0` op het vertrouwde thuis-LAN op de Pi). `debug` staat uit tenzij `FLASK_DEBUG`. `SECRET_KEY`: env > `data/secret_key` > automatisch gegenereerd. `data/` (DB, caches, secret) staat in `.gitignore`.
 
 ## Conventies & valkuilen
 
