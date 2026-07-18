@@ -633,6 +633,15 @@ def _portefeuille_holdings_reeks(accounts, venster=430):
         navs.append(holdings)
         flows.append(flow_d)
 
+    # Start bij de eerste dag met daadwerkelijk holdings (geen vlakke nul-inleiding
+    # vóór de eerste aankoop, bv. door de venster-marge of stille periodes).
+    eerste = next((i for i, v in enumerate(navs) if v and v > 0), None)
+    if eerste is None:
+        return {**leeg, "dekking": len(gedekt)}
+    grid, navs, flows = grid[eerste:], navs[eerste:], flows[eerste:]
+    if len(grid) < 2:
+        return {**leeg, "dekking": len(gedekt)}
+
     return {"grid": grid, "navs": navs, "flows": flows,
             "dekking": len(gedekt), "totaal_holdings": len(aandeel_tickers)}
 
@@ -653,15 +662,10 @@ def _portefeuille_twr(accounts, venster=400):
     if len(grid) < 20:
         return basis
 
-    # Start bij de eerste dag met holdings.
-    eerste = next((i for i, v in enumerate(navs) if v and v > 0), None)
-    if eerste is None or len(navs) - eerste < 2:
-        return basis
-    navs, flows, dgrid = navs[eerste:], flows[eerste:], grid[eerste:]
     cum = twr(navs, flows)
     if cum is None:
         return basis
-    dagen = max((dgrid[-1] - dgrid[0]).days, 1)
+    dagen = max((grid[-1] - grid[0]).days, 1)
     return {
         "cumulatief":      cum,
         "geannualiseerd":  annualiseer(cum, dagen),
