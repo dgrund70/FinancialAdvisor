@@ -302,6 +302,10 @@ def bouw_context(posities, koersen, wisselkoersen, macro, ticker_nieuws,
 
     titel = f"## Portefeuille{f' — tag: {tag_naam}' if tag_naam else ''}"
     regels.append(titel)
+    regels.append(
+        "*Percentages hieronder zijn TOTAALRENDEMENT SINDS AANKOOP, "
+        "geen koersbeweging van vandaag.*"
+    )
     if totaal_waarde > 0:
         totaal_winst = totaal_waarde - totaal_kosten
         regels.append(
@@ -332,7 +336,11 @@ def bouw_context(posities, koersen, wisselkoersen, macro, ticker_nieuws,
             regels.extend(kand_regels)
 
     if macro:
-        regels.append("\n## Macro-omgeving")
+        regels.append("\n## Macro-indicatoren — KOERSBEWEGING VANDAAG")
+        regels.append(
+            "*De percentages hier zijn de dagverandering van vandaag — "
+            "NIET hetzelfde als het totaalrendement van de posities hierboven.*"
+        )
         for naam, waarde in macro.items():
             regels.append(f"- {naam}: {waarde}")
 
@@ -350,6 +358,37 @@ def bouw_context(posities, koersen, wisselkoersen, macro, ticker_nieuws,
     return "\n".join(regels), totaal_waarde, totaal_kosten
 
 
+# Herbruikbaar door zowel advies_generator (bouw_prompt) als advies_team
+# (eindsynthese-agent) — zo blijft het outputformaat-contract (RISICO:/TIPS:/
+# ##-secties dat parse_kop() verwacht) op precies één plek gedefinieerd.
+FORMAAT_INSTRUCTIE = (
+    "Begin je antwoord met exact deze twee regels (en niets ervóór):\n"
+    "RISICO: N — <max 12 woorden motivatie>\n"
+    "TIPS: <komma-gescheiden Yahoo Finance-tickers van je concrete koop-suggesties>\n"
+    "waarbij N het risiconiveau weergeeft: "
+    "1=zeer defensief, 2=defensief, 3=neutraal, 4=offensief, 5=zeer offensief. "
+    "Gebruik bij TIPS uitsluitend geldige Yahoo Finance-tickers. "
+    "Zet daarna een lege regel en begin met '## Samenvatting'.\n\n"
+    "Geef een gestructureerd beleggingsadvies met precies deze secties:\n\n"
+    "## Samenvatting\n"
+    "2–3 zinnen met de kern van de situatie én de belangrijkste actie.\n\n"
+    "## Huidige posities\n"
+    "Per positie: houden / bijkopen / verkopen / reduceren, met concrete motivatie. "
+    "Onderbouw met de fundamentals (waardering zoals K/W en K/B, groei, marges, ROE, "
+    "analisten-koersdoel) waar beschikbaar, plus nieuws en macro. Verwijs naar de "
+    "concrete cijfers; verzin geen getallen die niet in de context staan.\n\n"
+    "## Nieuwe kansen\n"
+    "Als er een **volglijst** met kandidaten is meegegeven, beoordeel die eerst expliciet "
+    "(kopen / afwachten, onderbouwd met hun fundamentals). Vul daarna aan tot 3–5 concrete "
+    "nieuwe posities of sectoren. Geef per suggestie: ticker, waarom nu (onderbouw met "
+    "waardering/groei waar je die kent), en hoe het de portefeuille aanvult.\n\n"
+    "## Risico's\n"
+    "Concrete risico's voor deze specifieke portefeuille.\n\n"
+    "## Macro & Geopolitiek\n"
+    "Welke externe ontwikkelingen zijn nu het meest impactvol voor deze posities?"
+)
+
+
 def bouw_prompt(context, tag_naam=None):
     """Bouw de user-message voor de API-call."""
     if tag_naam:
@@ -361,34 +400,7 @@ def bouw_prompt(context, tag_naam=None):
     else:
         focus = ""
 
-    return (
-        f"{context}\n\n"
-        f"{focus}"
-        "Begin je antwoord met exact deze twee regels (en niets ervóór):\n"
-        "RISICO: N — <max 12 woorden motivatie>\n"
-        "TIPS: <komma-gescheiden Yahoo Finance-tickers van je concrete koop-suggesties>\n"
-        "waarbij N het risiconiveau weergeeft: "
-        "1=zeer defensief, 2=defensief, 3=neutraal, 4=offensief, 5=zeer offensief. "
-        "Gebruik bij TIPS uitsluitend geldige Yahoo Finance-tickers. "
-        "Zet daarna een lege regel en begin met '## Samenvatting'.\n\n"
-        "Geef een gestructureerd beleggingsadvies met precies deze secties:\n\n"
-        "## Samenvatting\n"
-        "2–3 zinnen met de kern van de situatie én de belangrijkste actie.\n\n"
-        "## Huidige posities\n"
-        "Per positie: houden / bijkopen / verkopen / reduceren, met concrete motivatie. "
-        "Onderbouw met de fundamentals (waardering zoals K/W en K/B, groei, marges, ROE, "
-        "analisten-koersdoel) waar beschikbaar, plus nieuws en macro. Verwijs naar de "
-        "concrete cijfers; verzin geen getallen die niet in de context staan.\n\n"
-        "## Nieuwe kansen\n"
-        "Als er een **volglijst** met kandidaten is meegegeven, beoordeel die eerst expliciet "
-        "(kopen / afwachten, onderbouwd met hun fundamentals). Vul daarna aan tot 3–5 concrete "
-        "nieuwe posities of sectoren. Geef per suggestie: ticker, waarom nu (onderbouw met "
-        "waardering/groei waar je die kent), en hoe het de portefeuille aanvult.\n\n"
-        "## Risico's\n"
-        "Concrete risico's voor deze specifieke portefeuille.\n\n"
-        "## Macro & Geopolitiek\n"
-        "Welke externe ontwikkelingen zijn nu het meest impactvol voor deze posities?"
-    )
+    return f"{context}\n\n{focus}{FORMAAT_INSTRUCTIE}"
 
 
 # ── Tips parsen & valideren ───────────────────────────────────────

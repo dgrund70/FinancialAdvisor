@@ -156,6 +156,18 @@ def render_markdown(text):
     return _render_md(text)
 
 
+@app.template_filter("fromjson")
+def parse_json(text):
+    """Voor Advies.team_details: JSON-string -> dict, of None bij leeg/ongeldig
+    (enkelvoudige adviezen hebben geen team_details)."""
+    if not text:
+        return None
+    try:
+        return json.loads(text)
+    except (ValueError, TypeError):
+        return None
+
+
 # ── Helpers ──────────────────────────────────────────────────────
 
 def laad_prijzen():
@@ -1518,6 +1530,37 @@ def advies_genereer(gebruiker_id):
         f"advies-{gebruiker_id}-{tag_id or 'generiek'}",
         cmd, timeout=120, klaar_bericht="Advies gegenereerd.")
     return {"taak_id": taak_id, "al_bezig": al_bezig}
+
+
+@app.route("/gebruiker/<int:gebruiker_id>/advies/team-genereer", methods=["POST"])
+def advies_team_genereer(gebruiker_id):
+    """Team-advies: 4 Claude-agents (Gewaagd/Gemiddeld/Macro-briefing/Persoonlijk
+    perspectief) + eindsynthese, i.p.v. de enkelvoudige advies_generator.py-call.
+    Duurt langer (meerdere sequentiële API-calls) — vandaar de ruimere timeout."""
+    Gebruiker.query.get_or_404(gebruiker_id)
+    if not os.environ.get("ANTHROPIC_API_KEY"):
+        return {"taak_id": None,
+                "fout": "Stel eerst ANTHROPIC_API_KEY in als omgevingsvariabele."}, 400
+    tag_id = request.form.get("tag_id", type=int)  # None = generiek
+    cmd = [sys.executable, str(BASE_DIR / "advies_team.py"),
+           "--gebruiker", str(gebruiker_id)]
+    if tag_id:
+        cmd += ["--tag", str(tag_id)]
+    taak_id, al_bezig = _start_taak(
+        f"advies-team-{gebruiker_id}-{tag_id or 'generiek'}",
+        cmd, timeout=240, klaar_bericht="Team-advies gegenereerd.")
+    return {"taak_id": taak_id, "al_bezig": al_bezig}
+
+
+@app.route("/gebruiker/<int:gebruiker_id>/risicoprofiel/bijwerken", methods=["POST"])
+def risicoprofiel_bijwerken(gebruiker_id):
+    """Persoonlijke context voor de 'Persoonlijk perspectief'-rol in het
+    team-advies (bijv. privé vs. zakelijk vermogen, risicohouding, horizon)."""
+    gebruiker = Gebruiker.query.get_or_404(gebruiker_id)
+    gebruiker.risicoprofiel = request.form.get("risicoprofiel", "").strip() or None
+    db.session.commit()
+    flash("Risicoprofiel opgeslagen.", "success")
+    return redirect(url_for("advies", gebruiker_id=gebruiker_id))
 
 
 @app.route("/gebruiker/<int:gebruiker_id>/nieuws/verversen", methods=["POST"])

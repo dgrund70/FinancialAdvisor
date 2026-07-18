@@ -15,6 +15,44 @@
   {% endif %}
 {% endmacro %}
 
+{# ── Transparantie-accordion: tussenstappen van een team-advies ─── #}
+{% macro team_accordion(adv) %}
+  {% set details = adv.team_details | fromjson %}
+  {% if details %}
+  <div class="accordion accordion-flush mt-3" id="team-{{ adv.id }}">
+    <div class="accordion-item border-0">
+      <h2 class="accordion-header">
+        <button class="accordion-button collapsed py-2 small" type="button"
+                data-bs-toggle="collapse" data-bs-target="#team-body-{{ adv.id }}">
+          <i class="bi bi-people me-2 text-secondary"></i>Bekijk de afweging van het team
+        </button>
+      </h2>
+      <div id="team-body-{{ adv.id }}" class="accordion-collapse collapse"
+           data-bs-parent="#team-{{ adv.id }}">
+        <div class="accordion-body small">
+          {% if details.gewaagd %}
+          <p class="fw-semibold mb-1"><i class="bi bi-graph-up-arrow me-1 text-danger"></i>Gewaagd</p>
+          <div class="advies-tekst mb-3">{{ details.gewaagd.tekst | markdown }}</div>
+          {% endif %}
+          {% if details.gemiddeld %}
+          <p class="fw-semibold mb-1"><i class="bi bi-shield-check me-1 text-success"></i>Gemiddeld risico</p>
+          <div class="advies-tekst mb-3">{{ details.gemiddeld.tekst | markdown }}</div>
+          {% endif %}
+          {% if details.macro_briefing %}
+          <p class="fw-semibold mb-1"><i class="bi bi-globe2 me-1 text-info"></i>Macro/geo-briefing</p>
+          <div class="advies-tekst mb-3">{{ details.macro_briefing.tekst | markdown }}</div>
+          {% endif %}
+          {% if details.perspectief %}
+          <p class="fw-semibold mb-1"><i class="bi bi-compass me-1 text-primary"></i>Persoonlijk perspectief</p>
+          <div class="advies-tekst mb-0">{{ details.perspectief.tekst | markdown }}</div>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+  </div>
+  {% endif %}
+{% endmacro %}
+
 {# ── API-key waarschuwing ──────────────────────────────────────── #}
 {% if not heeft_api_key %}
 <div class="alert alert-warning d-flex align-items-center gap-2 mb-3">
@@ -46,6 +84,13 @@
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
       <button class="btn btn-primary btn-sm" {{ 'disabled' if not heeft_api_key }}>
         <i class="bi bi-stars me-1"></i>Genereer advies
+      </button>
+    </form>
+    <form method="post" action="{{ url_for('advies_team_genereer', gebruiker_id=gebruiker.id) }}" data-taak>
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <button class="btn btn-outline-primary btn-sm" {{ 'disabled' if not heeft_api_key }}
+              title="Vier agents (gewaagd/gemiddeld/macro-briefing/persoonlijk perspectief) + eindsynthese — duurt langer en kost iets meer dan het gewone advies.">
+        <i class="bi bi-people me-1"></i>Team-advies
       </button>
     </form>
   </div>
@@ -183,6 +228,7 @@
         </div>
         {% endif %}
         {{ advies.advies_tekst | markdown }}
+        {{ team_accordion(advies) }}
       </div>
     </div>
     {% else %}
@@ -231,16 +277,25 @@
               {% if tag_adviezen.get(tag) %}
                 <div class="advies-tekst">
                   {{ tag_adviezen[tag].advies_tekst | markdown }}
+                  {{ team_accordion(tag_adviezen[tag]) }}
                 </div>
               {% endif %}
-              <form method="post" action="{{ url_for('advies_genereer', gebruiker_id=gebruiker.id) }}"
-                    class="mt-3" data-taak>
-                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                <input type="hidden" name="tag_id" value="{{ tag.id }}">
-                <button class="btn btn-outline-primary btn-sm" {{ 'disabled' if not heeft_api_key }}>
-                  <i class="bi bi-stars me-1"></i>Genereer advies voor "{{ tag.naam }}"
-                </button>
-              </form>
+              <div class="d-flex gap-2 flex-wrap mt-3">
+                <form method="post" action="{{ url_for('advies_genereer', gebruiker_id=gebruiker.id) }}" data-taak>
+                  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                  <input type="hidden" name="tag_id" value="{{ tag.id }}">
+                  <button class="btn btn-outline-primary btn-sm" {{ 'disabled' if not heeft_api_key }}>
+                    <i class="bi bi-stars me-1"></i>Genereer advies voor "{{ tag.naam }}"
+                  </button>
+                </form>
+                <form method="post" action="{{ url_for('advies_team_genereer', gebruiker_id=gebruiker.id) }}" data-taak>
+                  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                  <input type="hidden" name="tag_id" value="{{ tag.id }}">
+                  <button class="btn btn-outline-secondary btn-sm" {{ 'disabled' if not heeft_api_key }}>
+                    <i class="bi bi-people me-1"></i>Team-advies voor "{{ tag.naam }}"
+                  </button>
+                </form>
+              </div>
             </div>
           </div>
         </div>
@@ -274,6 +329,7 @@
                data-bs-parent="#adviesHistorie">
             <div class="accordion-body advies-tekst">
               {{ ouder.advies_tekst | markdown }}
+              {{ team_accordion(ouder) }}
             </div>
           </div>
         </div>
@@ -286,6 +342,28 @@
 
   {# ── Rechterkolom: nieuws per positie ─────────────────────────── #}
   <div class="col-12 col-lg-5">
+
+    {# ── Risicoprofiel voor het team-advies ──────────────────────── #}
+    <div class="card border-0 shadow-sm mb-4">
+      <div class="card-header bg-white border-bottom py-3">
+        <h6 class="mb-0 fw-semibold">
+          <i class="bi bi-person-vcard me-2 text-secondary"></i>Mijn risicoprofiel
+        </h6>
+      </div>
+      <div class="card-body">
+        <p class="text-muted small mb-3">
+          Persoonlijke context voor de "Persoonlijk perspectief"-rol in het team-advies
+          — bijv. of dit privé- of zakelijk vermogen is, je risicohouding en horizon.
+          Zonder profiel redeneert het team vanuit een algemeen voorzichtige belegger.
+        </p>
+        <form method="post" action="{{ url_for('risicoprofiel_bijwerken', gebruiker_id=gebruiker.id) }}">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <textarea class="form-control mb-2" name="risicoprofiel" rows="4"
+                    placeholder="Bijv.: Dit is mijn privévermogen. Ik ga er voorzichtig mee om, maar wil wel waardevermeerdering — dus kansen met acceptabel risico.">{{ gebruiker.risicoprofiel or '' }}</textarea>
+          <button class="btn btn-outline-secondary btn-sm"><i class="bi bi-save me-1"></i>Opslaan</button>
+        </form>
+      </div>
+    </div>
 
     {% if ticker_nieuws %}
     <div class="card border-0 shadow-sm mb-4">

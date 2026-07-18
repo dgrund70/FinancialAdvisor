@@ -29,6 +29,7 @@ class Gebruiker(db.Model):
     __tablename__ = "gebruikers"
     id            = db.Column(db.Integer, primary_key=True)
     naam          = db.Column(db.String(100), nullable=False)
+    risicoprofiel = db.Column(db.Text, nullable=True)   # persoonlijke context voor het team-advies
     broker_accounts = db.relationship(
         "BrokerAccount", backref="gebruiker",
         cascade="all, delete-orphan", lazy=True
@@ -138,6 +139,7 @@ class Advies(db.Model):
     model               = db.Column(db.String(50), nullable=True)
     risico_score        = db.Column(db.Integer, nullable=True)   # 1 (defensief) – 5 (offensief)
     risico_reden        = db.Column(db.Text, nullable=True)
+    team_details        = db.Column(db.Text, nullable=True)   # JSON: tussenstappen team-advies (None = enkelvoudig advies)
     aanbevelingen       = db.relationship(
         "Aanbeveling", backref="advies",
         cascade="all, delete-orphan", lazy=True
