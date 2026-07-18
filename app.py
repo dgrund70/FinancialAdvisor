@@ -541,7 +541,9 @@ def _portefeuille_risico(holdings, benchmark_ticker="IWDA.AS", venster=252):
     hist   = _laad_historie({t for t, _ in holdings} | {benchmark_ticker})
     gedekt = [(t, a) for t, a in holdings if t in hist and len(hist[t][0]) > 2]
     if not gedekt:
-        return {"dekking": 0, "totaal_holdings": len(holdings), "te_weinig_data": True}
+        return {"dekking": 0, "totaal_holdings": len(holdings), "te_weinig_data": True,
+                "volatiliteit": None, "max_drawdown": None, "sharpe": None, "beta": None,
+                "per_holding": None, "correlatie": None, "dagen": 0}
 
     serie  = {t: dict(zip(hist[t][0], hist[t][1])) for t, _ in gedekt}
     gemeen = set.intersection(*[set(serie[t]) for t, _ in gedekt])
@@ -552,7 +554,9 @@ def _portefeuille_risico(holdings, benchmark_ticker="IWDA.AS", venster=252):
     gemeen = sorted(gemeen)[-venster:]
     if len(gemeen) < 20:
         return {"dekking": len(gedekt), "totaal_holdings": len(holdings),
-                "te_weinig_data": True}
+                "te_weinig_data": True,
+                "volatiliteit": None, "max_drawdown": None, "sharpe": None, "beta": None,
+                "per_holding": None, "correlatie": None, "dagen": 0}
 
     waarden   = [sum(a * serie[t][d] for t, a in gedekt) for d in gemeen]
     port_rend = dagrendementen(waarden)
@@ -602,13 +606,15 @@ def _portefeuille_twr(accounts, venster=400):
     hist   = _laad_historie(aandeel_tickers)
     gedekt = {t for t in aandeel_tickers if t in hist and len(hist[t][0]) > 2}
     if not gedekt:
-        return {"dekking": 0, "totaal_holdings": len(aandeel_tickers), "te_weinig_data": True}
+        return {"dekking": 0, "totaal_holdings": len(aandeel_tickers), "te_weinig_data": True,
+                "cumulatief": None, "geannualiseerd": None, "dagen": 0}
 
     serie = {t: dict(zip(hist[t][0], hist[t][1])) for t in gedekt}
     grid  = sorted({d for t in gedekt for d in serie[t]})[-venster:]
     if len(grid) < 20:
         return {"dekking": len(gedekt), "totaal_holdings": len(aandeel_tickers),
-                "te_weinig_data": True}
+                "te_weinig_data": True,
+                "cumulatief": None, "geannualiseerd": None, "dagen": 0}
 
     txs_sorted = sorted(txs, key=lambda t: (t.datum, t.id))
     qty, laatste_koers = {}, {}
@@ -658,12 +664,14 @@ def _portefeuille_twr(accounts, venster=400):
     eerste = next((i for i, v in enumerate(navs) if v and v > 0), None)
     if eerste is None or len(navs) - eerste < 2:
         return {"dekking": len(gedekt), "totaal_holdings": len(aandeel_tickers),
-                "te_weinig_data": True}
+                "te_weinig_data": True,
+                "cumulatief": None, "geannualiseerd": None, "dagen": 0}
     navs, flows, dgrid = navs[eerste:], flows[eerste:], grid[eerste:]
     cum = twr(navs, flows)
     if cum is None:
         return {"dekking": len(gedekt), "totaal_holdings": len(aandeel_tickers),
-                "te_weinig_data": True}
+                "te_weinig_data": True,
+                "cumulatief": None, "geannualiseerd": None, "dagen": 0}
     dagen = max((dgrid[-1] - dgrid[0]).days, 1)
     return {
         "cumulatief":      cum,
