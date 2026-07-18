@@ -95,11 +95,17 @@
 {# ── Waardeontwikkeling grafiek ────────────────────────────────── #}
 {% if waarde_serie and waarde_serie | length > 1 %}
 <div class="card border-0 shadow-sm mb-4">
-  <div class="card-header bg-white border-bottom py-3">
+  <div class="card-header bg-white border-bottom py-3 d-flex justify-content-between align-items-center flex-wrap gap-2">
     <h6 class="mb-0 fw-semibold">
       <i class="bi bi-graph-up me-2 text-success"></i>Waardeontwikkeling
-      <span class="text-muted fw-normal small">· gebaseerd op advies-snapshots</span>
+      <span class="text-muted fw-normal small">· op basis van koershistorie</span>
     </h6>
+    <div class="btn-group btn-group-sm" role="group" aria-label="Periode">
+      <button type="button" class="btn btn-outline-secondary periode-btn" data-dagen="7">1W</button>
+      <button type="button" class="btn btn-outline-secondary periode-btn" data-dagen="30">1M</button>
+      <button type="button" class="btn btn-outline-secondary periode-btn" data-dagen="90">3M</button>
+      <button type="button" class="btn btn-outline-secondary periode-btn active" data-dagen="0">Alles</button>
+    </div>
   </div>
   <div class="card-body">
     <canvas id="waardeChart" height="80"></canvas>
@@ -391,27 +397,24 @@
         integrity="sha384-NrKB+u6Ts6AtkIhwPixiKTzgSKNblyhlk0Sohlgar9UHUBzai/sgnNNWWd291xqt"
         crossorigin="anonymous"></script>
 <script>
-  const ws = {{ waarde_serie | tojson }};
-  const risicoKleur = { 1: "#198754", 2: "#198754", 3: "#ffc107", 4: "#dc3545", 5: "#dc3545" };
-  const risicoLabel = { 1: "Zeer defensief", 2: "Defensief", 3: "Neutraal", 4: "Offensief", 5: "Zeer offensief" };
-  const puntKleuren = ws.map(d => risicoKleur[d.risico] || "#adb5bd");
-  new Chart(document.getElementById("waardeChart"), {
+  const wsAll = {{ waarde_serie | tojson }};
+  const fmtDatum = iso => { const [, m, d] = iso.split("-"); return `${d}-${m}`; };
+
+  const waardeChart = new Chart(document.getElementById("waardeChart"), {
     type: "line",
     data: {
-      labels: ws.map(d => d.datum),
+      labels: wsAll.map(d => fmtDatum(d.datum)),
       datasets: [
         {
           label: "Portefeuillewaarde (€)",
-          data: ws.map(d => d.waarde),
+          data: wsAll.map(d => d.waarde),
           borderColor: "#198754",
           backgroundColor: "rgba(25,135,84,.10)",
-          fill: true, tension: .3,
-          pointRadius: 5, pointHoverRadius: 7,
-          pointBackgroundColor: puntKleuren, pointBorderColor: puntKleuren,
+          fill: true, tension: .3, pointRadius: 0, pointHoverRadius: 5,
         },
         {
-          label: "Inleg / kostprijs (€)",
-          data: ws.map(d => d.kosten),
+          label: "Netto inleg, cumulatief (€)",
+          data: wsAll.map(d => d.inleg),
           borderColor: "#adb5bd",
           borderDash: [6, 4], fill: false, tension: 0, pointRadius: 0,
         },
@@ -424,14 +427,31 @@
         legend: { position: "bottom" },
         tooltip: { callbacks: {
           label: c => `${c.dataset.label}: €${(c.parsed.y ?? 0).toLocaleString("nl-NL")}`,
-          afterBody: items => {
-            const r = ws[items[0].dataIndex].risico;
-            return r ? `Risico: ${r}/5 · ${risicoLabel[r]}` : "";
-          },
         } },
       },
       scales: { y: { ticks: { callback: v => "€" + v.toLocaleString("nl-NL") } } },
     },
+  });
+
+  function toonPeriode(dagen) {
+    const subset = (() => {
+      if (!dagen) return wsAll;
+      const laatste = new Date(wsAll[wsAll.length - 1].datum);
+      const grens = new Date(laatste.getTime() - dagen * 86400000);
+      return wsAll.filter(d => new Date(d.datum) >= grens);
+    })();
+    waardeChart.data.labels = subset.map(d => fmtDatum(d.datum));
+    waardeChart.data.datasets[0].data = subset.map(d => d.waarde);
+    waardeChart.data.datasets[1].data = subset.map(d => d.inleg);
+    waardeChart.update();
+  }
+
+  document.querySelectorAll(".periode-btn").forEach(btn => {
+    btn.addEventListener("click", () => {
+      document.querySelectorAll(".periode-btn").forEach(b => b.classList.remove("active"));
+      btn.classList.add("active");
+      toonPeriode(parseInt(btn.dataset.dagen, 10));
+    });
   });
 </script>
 {% endif %}

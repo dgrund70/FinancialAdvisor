@@ -459,35 +459,9 @@ def dashboard(gebruiker_id):
                      if grand_has_prices and grand_vorig and abs(grand_vorig) > 0.01
                      else None)
 
-    # Waardeontwikkelingsreeks voor grafiek (op basis van opgeslagen advies-snapshots)
-    grens_ws = datetime.now() - timedelta(days=30)
-    waarde_serie = []
-    for a in (Advies.query
-              .filter(Advies.gebruiker_id == gebruiker_id,
-                      Advies.tag_id == None,
-                      Advies.gegenereerd >= grens_ws)
-              .order_by(Advies.gegenereerd).all()):
-        try:
-            snap = json.loads(a.portfolio_snapshot)
-        except (ValueError, TypeError):
-            continue
-        waarde = snap.get("totaal_waarde")
-        kosten = snap.get("totaal_kosten")
-        if waarde is None or kosten is None:
-            w = k = 0.0
-            for p in snap.get("posities", []):
-                k += p["aantal"] * p["aankoopprijs"]
-                p_koers = koersen.get(p["ticker"], {}).get("koers")
-                if p_koers:
-                    w += p["aantal"] * p_koers
-            waarde = round(w, 2) if w else None
-            kosten = round(k, 2)
-        waarde_serie.append({
-            "datum":  a.gegenereerd.strftime("%d-%m %H:%M"),
-            "waarde": waarde,
-            "kosten": kosten,
-            "risico": a.risico_score,
-        })
+    # Waardeontwikkelingsreeks voor grafiek, op basis van echte koershistorie
+    # (niet meer van advies-snapshots — front-end filtert zelf op periode).
+    waarde_serie = _portefeuille_waarde_serie(accounts)
 
     return render_template(
         "dashboard.html",
@@ -587,34 +561,33 @@ def _portefeuille_risico(holdings, benchmark_ticker="IWDA.AS", venster=252):
     return res
 
 
-def _portefeuille_twr(accounts, venster=400):
-    """Tijd-gewogen rendement van de belegde holdings.
+def _portefeuille_holdings_reeks(accounts, venster=430):
+    """Reconstrueert de dagelijkse EUR-waarde van de **holdings-pot** (géén cash)
+    uit het grootboek + koers_historie, en de netto-flow (aan-/verkoop/correctie)
+    die dag in/uit die pot. Gedeelde basis voor TWR (`_portefeuille_twr`) en de
+    waardeontwikkelingsgrafiek (`_portefeuille_waarde_serie`).
 
-    Waardeert alleen de **holdings** (Σ qty·koers, EUR) per dag uit het grootboek
-    + koers_historie, en behandelt aan-/verkopen (en correcties) als externe
-    flows naar die pot. Zo meet TWR puur het rendement van je posities, los van
-    de timing van stortingen — en hangt het niet af van een (hier ontbrekend)
-    cash-saldo. Geeft {cumulatief, geannualiseerd, dagen, dekking, ...} of None.
+    Geeft {grid, navs, flows, dekking, totaal_holdings}; grid/navs/flows leeg
+    ([]) als er te weinig koershistorie is om iets te reconstrueren.
     """
     _, _, wisselkoersen = laad_prijzen()
     txs = [tx for acc in accounts for tx in acc.transacties]
-    if not txs:
-        return None
-
     aandeel_tickers = {tx.ticker for tx in txs
                        if tx.type in ("koop", "verkoop", "correctie") and tx.ticker}
+    leeg = {"grid": [], "navs": [], "flows": [],
+            "dekking": 0, "totaal_holdings": len(aandeel_tickers)}
+    if not txs or not aandeel_tickers:
+        return leeg
+
     hist   = _laad_historie(aandeel_tickers)
     gedekt = {t for t in aandeel_tickers if t in hist and len(hist[t][0]) > 2}
     if not gedekt:
-        return {"dekking": 0, "totaal_holdings": len(aandeel_tickers), "te_weinig_data": True,
-                "cumulatief": None, "geannualiseerd": None, "dagen": 0}
+        return leeg
 
     serie = {t: dict(zip(hist[t][0], hist[t][1])) for t in gedekt}
     grid  = sorted({d for t in gedekt for d in serie[t]})[-venster:]
-    if len(grid) < 20:
-        return {"dekking": len(gedekt), "totaal_holdings": len(aandeel_tickers),
-                "te_weinig_data": True,
-                "cumulatief": None, "geannualiseerd": None, "dagen": 0}
+    if len(grid) < 2:
+        return {**leeg, "dekking": len(gedekt)}
 
     txs_sorted = sorted(txs, key=lambda t: (t.datum, t.id))
     qty, laatste_koers = {}, {}
@@ -660,27 +633,60 @@ def _portefeuille_twr(accounts, venster=400):
         navs.append(holdings)
         flows.append(flow_d)
 
+    return {"grid": grid, "navs": navs, "flows": flows,
+            "dekking": len(gedekt), "totaal_holdings": len(aandeel_tickers)}
+
+
+def _portefeuille_twr(accounts, venster=400):
+    """Tijd-gewogen rendement van de belegde holdings.
+
+    Waardeert alleen de **holdings** (Σ qty·koers, EUR) per dag uit het grootboek
+    + koers_historie, en behandelt aan-/verkopen (en correcties) als externe
+    flows naar die pot. Zo meet TWR puur het rendement van je posities, los van
+    de timing van stortingen — en hangt het niet af van een (hier ontbrekend)
+    cash-saldo. Geeft {cumulatief, geannualiseerd, dagen, dekking, ...}.
+    """
+    reeks = _portefeuille_holdings_reeks(accounts, venster=venster)
+    basis = {"dekking": reeks["dekking"], "totaal_holdings": reeks["totaal_holdings"],
+             "te_weinig_data": True, "cumulatief": None, "geannualiseerd": None, "dagen": 0}
+    grid, navs, flows = reeks["grid"], reeks["navs"], reeks["flows"]
+    if len(grid) < 20:
+        return basis
+
     # Start bij de eerste dag met holdings.
     eerste = next((i for i, v in enumerate(navs) if v and v > 0), None)
     if eerste is None or len(navs) - eerste < 2:
-        return {"dekking": len(gedekt), "totaal_holdings": len(aandeel_tickers),
-                "te_weinig_data": True,
-                "cumulatief": None, "geannualiseerd": None, "dagen": 0}
+        return basis
     navs, flows, dgrid = navs[eerste:], flows[eerste:], grid[eerste:]
     cum = twr(navs, flows)
     if cum is None:
-        return {"dekking": len(gedekt), "totaal_holdings": len(aandeel_tickers),
-                "te_weinig_data": True,
-                "cumulatief": None, "geannualiseerd": None, "dagen": 0}
+        return basis
     dagen = max((dgrid[-1] - dgrid[0]).days, 1)
     return {
         "cumulatief":      cum,
         "geannualiseerd":  annualiseer(cum, dagen),
         "dagen":           len(navs),
-        "dekking":         len(gedekt),
-        "totaal_holdings": len(aandeel_tickers),
+        "dekking":         reeks["dekking"],
+        "totaal_holdings": reeks["totaal_holdings"],
         "te_weinig_data":  False,
     }
+
+
+def _portefeuille_waarde_serie(accounts):
+    """Waardeontwikkeling voor de dashboardgrafiek, op basis van échte
+    koershistorie (géén advies-snapshots): per dag de holdings-waarde (EUR) en
+    de cumulatieve netto-inleg in die holdings-pot. Front-end filtert dit zelf
+    op periode (week/maand/3 maanden/alles) — dus hier altijd de volle reeks."""
+    reeks = _portefeuille_holdings_reeks(accounts, venster=430)
+    grid, navs, flows = reeks["grid"], reeks["navs"], reeks["flows"]
+    if len(grid) < 2:
+        return []
+    serie, inleg_cum = [], 0.0
+    for d, w, f in zip(grid, navs, flows):
+        inleg_cum += f
+        serie.append({"datum": d.isoformat(), "waarde": round(w, 2),
+                       "inleg": round(inleg_cum, 2)})
+    return serie
 
 
 @app.route("/gebruiker/<int:gebruiker_id>/analyse")
