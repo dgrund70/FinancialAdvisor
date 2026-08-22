@@ -567,15 +567,20 @@ def _portefeuille_holdings_reeks(accounts, venster=430):
     die dag in/uit die pot. Gedeelde basis voor TWR (`_portefeuille_twr`) en de
     waardeontwikkelingsgrafiek (`_portefeuille_waarde_serie`).
 
-    Geeft {grid, navs, flows, dekking, totaal_holdings}; grid/navs/flows leeg
-    ([]) als er te weinig koershistorie is om iets te reconstrueren.
+    Geeft {grid, navs, flows, dekking, totaal_holdings, gedekt, qty_nu, flow_na};
+    grid/navs/flows leeg ([]) als er te weinig koershistorie is om iets te
+    reconstrueren. `qty_nu` en `flow_na` dekken óók de transacties ná de laatste
+    griddag: koershistorie van fondsen loopt een dag of twee achter, dus wie de
+    grafiek tot vandaag wil doortrekken (`_portefeuille_waarde_serie`) heeft de
+    stukken van nú nodig, niet die van de laatste dag met een koers.
     """
     _, _, wisselkoersen = laad_prijzen()
     txs = [tx for acc in accounts for tx in acc.transacties]
     aandeel_tickers = {tx.ticker for tx in txs
                        if tx.type in ("koop", "verkoop", "correctie") and tx.ticker}
     leeg = {"grid": [], "navs": [], "flows": [],
-            "dekking": 0, "totaal_holdings": len(aandeel_tickers)}
+            "dekking": 0, "totaal_holdings": len(aandeel_tickers),
+            "gedekt": set(), "qty_nu": {}, "flow_na": 0.0}
     if not txs or not aandeel_tickers:
         return leeg
 
@@ -594,6 +599,34 @@ def _portefeuille_holdings_reeks(accounts, venster=430):
     idx = 0
     navs, flows = [], []
 
+    def verwerk(tx):
+        """Boek één trade in `qty` en geef de EUR-flow in/uit de holdings-pot."""
+        if tx.ticker not in gedekt:
+            return 0.0
+        v      = tx.valuta or "EUR"
+        aantal = tx.aantal or 0.0
+        prijs  = tx.prijs or 0.0
+        kosten = tx.kosten or 0.0
+        if tx.type == "koop":
+            flow_eur = naar_eur(aantal * prijs + kosten, v, wisselkoersen)
+            if flow_eur is None:
+                # FX ontbreekt: schat op basis van EUR-koershistorie (al FX-gecorrigeerd)
+                flow_eur = aantal * (laatste_koers.get(tx.ticker) or 0.0)
+            qty[tx.ticker] = qty.get(tx.ticker, 0.0) + aantal
+            return flow_eur
+        if tx.type == "verkoop":
+            flow_eur = naar_eur(aantal * prijs - kosten, v, wisselkoersen)
+            if flow_eur is None:
+                flow_eur = aantal * (laatste_koers.get(tx.ticker) or 0.0)
+            qty[tx.ticker] = qty.get(tx.ticker, 0.0) - aantal
+            return -flow_eur
+        if tx.type == "correctie":
+            oud   = qty.get(tx.ticker, 0.0)
+            koers = laatste_koers.get(tx.ticker) or (naar_eur(prijs, v, wisselkoersen) or 0.0)
+            qty[tx.ticker] = aantal
+            return (aantal - oud) * koers
+        return 0.0
+
     for d in grid:
         for t in gedekt:                       # carry-forward laatst bekende koers ≤ d
             if d in serie[t]:
@@ -602,31 +635,7 @@ def _portefeuille_holdings_reeks(accounts, venster=430):
         # Trades t/m deze datum: het bedrag dat de holdings-pot in/uit gaat is een
         # externe flow (geen rendement).
         while idx < len(txs_sorted) and txs_sorted[idx].datum <= d:
-            tx = txs_sorted[idx]; idx += 1
-            if tx.ticker not in gedekt:
-                continue
-            v      = tx.valuta or "EUR"
-            aantal = tx.aantal or 0.0
-            prijs  = tx.prijs or 0.0
-            kosten = tx.kosten or 0.0
-            if tx.type == "koop":
-                flow_eur = naar_eur(aantal * prijs + kosten, v, wisselkoersen)
-                if flow_eur is None:
-                    # FX ontbreekt: schat op basis van EUR-koershistorie (al FX-gecorrigeerd)
-                    flow_eur = aantal * (laatste_koers.get(tx.ticker) or 0.0)
-                flow_d += flow_eur
-                qty[tx.ticker] = qty.get(tx.ticker, 0.0) + aantal
-            elif tx.type == "verkoop":
-                flow_eur = naar_eur(aantal * prijs - kosten, v, wisselkoersen)
-                if flow_eur is None:
-                    flow_eur = aantal * (laatste_koers.get(tx.ticker) or 0.0)
-                flow_d -= flow_eur
-                qty[tx.ticker] = qty.get(tx.ticker, 0.0) - aantal
-            elif tx.type == "correctie":
-                oud   = qty.get(tx.ticker, 0.0)
-                koers = laatste_koers.get(tx.ticker) or (naar_eur(prijs, v, wisselkoersen) or 0.0)
-                flow_d += (aantal - oud) * koers
-                qty[tx.ticker] = aantal
+            flow_d += verwerk(txs_sorted[idx]); idx += 1
 
         holdings = sum(qty.get(t, 0.0) * laatste_koers[t]
                        for t in gedekt if t in laatste_koers)
@@ -642,8 +651,15 @@ def _portefeuille_holdings_reeks(accounts, venster=430):
     if len(grid) < 2:
         return {**leeg, "dekking": len(gedekt)}
 
+    # Restant: trades ná de laatste dag met koershistorie. Die tellen niet mee in
+    # navs/flows (daar hoort geen koers bij), maar wél in de stand van vandaag.
+    flow_na = 0.0
+    while idx < len(txs_sorted):
+        flow_na += verwerk(txs_sorted[idx]); idx += 1
+
     return {"grid": grid, "navs": navs, "flows": flows,
-            "dekking": len(gedekt), "totaal_holdings": len(aandeel_tickers)}
+            "dekking": len(gedekt), "totaal_holdings": len(aandeel_tickers),
+            "gedekt": gedekt, "qty_nu": dict(qty), "flow_na": flow_na}
 
 
 def _portefeuille_twr(accounts, venster=400):
@@ -720,6 +736,31 @@ def _mutatie_markers(accounts, grid):
     return markers
 
 
+def _live_holdings_waarde(reeks):
+    """EUR-waarde van de gedekte holdings tegen de *actuele* koers uit
+    prijzen.json, op basis van de stukken van nú (`qty_nu`).
+
+    None zodra één van die holdings geen bruikbare live koers heeft: een
+    ontbrekende koers zou het laatste punt van de grafiek laten inzakken en dat
+    leest als koersverlies dat er niet is.
+    """
+    koersen, _, wisselkoersen = laad_prijzen()
+    totaal = 0.0
+    for ticker in reeks["gedekt"]:
+        aantal = reeks["qty_nu"].get(ticker, 0.0)
+        if abs(aantal) < 1e-9:
+            continue
+        info = koersen.get(ticker) or {}
+        koers = info.get("koers")
+        if koers is None:
+            return None
+        eur = naar_eur(aantal * koers, info.get("valuta") or "EUR", wisselkoersen)
+        if eur is None:
+            return None
+        totaal += eur
+    return totaal if totaal > 0 else None
+
+
 def _portefeuille_waarde_serie(accounts):
     """Waardeontwikkeling voor de dashboardgrafiek, op basis van échte
     koershistorie (géén advies-snapshots): per dag de holdings-waarde (EUR),
@@ -736,6 +777,20 @@ def _portefeuille_waarde_serie(accounts):
     grid, navs, flows = reeks["grid"], reeks["navs"], reeks["flows"]
     if len(grid) < 2:
         return []
+
+    # Koershistorie van beleggingsfondsen loopt een dag of twee achter (de NAV
+    # van een handelsdag wordt pas daarna gepubliceerd), en in het weekend komt
+    # er niets bij. Plak daarom de actuele koers uit prijzen.json als laatste
+    # punt aan de lijn: dan eindigt de grafiek op hetzelfde bedrag als de tegels
+    # bovenaan, en vallen mutaties van ná de laatste koersdag alsnog binnen het
+    # bereik van de markers.
+    vandaag  = date.today()
+    live_iso = None
+    live     = _live_holdings_waarde(reeks)
+    if live is not None and vandaag > grid[-1]:
+        grid, navs, flows = grid + [vandaag], navs + [live], flows + [reeks["flow_na"]]
+        live_iso = vandaag.isoformat()
+
     markers = _mutatie_markers(accounts, grid)
     serie, inleg_cum = [], 0.0
     for d, w, f in zip(grid, navs, flows):
@@ -743,7 +798,8 @@ def _portefeuille_waarde_serie(accounts):
         iso = d.isoformat()
         serie.append({"datum": iso, "waarde": round(w, 2),
                        "inleg": round(inleg_cum, 2),
-                       "mutatie": markers.get(iso)})
+                       "mutatie": markers.get(iso),
+                       "live": iso == live_iso})
     return serie
 
 

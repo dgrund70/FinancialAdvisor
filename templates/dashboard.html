@@ -107,6 +107,9 @@
     <h6 class="mb-0 fw-semibold">
       <i class="bi bi-graph-up me-2 text-success"></i>Waardeontwikkeling
       <span class="text-muted fw-normal small">· belegd vermogen, exclusief cash</span>
+      {% if waarde_serie[-1].live %}
+        <span class="text-muted fw-normal small">· laatste punt op actuele koers</span>
+      {% endif %}
     </h6>
     <small class="text-muted d-none d-md-block">
       <span class="mutatie-legenda"></span> mutatie in het grootboek
@@ -465,7 +468,17 @@
           data: wsAll.map(d => d.waarde),
           borderColor: "#198754",
           backgroundColor: "rgba(25,135,84,.10)",
-          fill: true, tension: .3, pointRadius: 0, pointHoverRadius: 5,
+          fill: true, tension: .3, pointHoverRadius: 5,
+          // Laatste punt komt van de live koers i.p.v. uit de koershistorie:
+          // open bolletje + gestreept eindstuk, zodat je ziet dat het een
+          // andere bron is dan de rest van de lijn.
+          pointRadius: ctx => (wsHuidig[ctx.dataIndex] || {}).live ? 4 : 0,
+          pointBackgroundColor: "#fff",
+          pointBorderColor: "#198754",
+          pointBorderWidth: 2,
+          segment: {
+            borderDash: ctx => (wsHuidig[ctx.p1DataIndex] || {}).live ? [5, 3] : undefined,
+          },
         },
         {
           label: "Netto inleg, cumulatief (€)",
@@ -483,8 +496,12 @@
         tooltip: { callbacks: {
           label: c => `${c.dataset.label}: €${(c.parsed.y ?? 0).toLocaleString("nl-NL")}`,
           footer: items => {
-            const m = items.length ? (wsHuidig[items[0].dataIndex] || {}).mutatie : null;
-            return m ? "Grootboek: " + m : "";
+            if (!items.length) return "";
+            const punt = wsHuidig[items[0].dataIndex] || {};
+            const regels = [];
+            if (punt.mutatie) regels.push("Grootboek: " + punt.mutatie);
+            if (punt.live) regels.push("Actuele koers — nog niet in de koershistorie");
+            return regels;
           },
         } },
       },
