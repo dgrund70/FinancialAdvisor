@@ -17,7 +17,15 @@
     <div class="card h-100 border-0 shadow-sm">
       <div class="card-body">
         <p class="text-muted small mb-1"><i class="bi bi-wallet2 me-1"></i>Totale waarde{{ uitleg('waarde') }}</p>
-        <h4 class="fw-bold mb-0">{{ eur(totaal.waarde) }}</h4>
+        <h4 class="fw-bold mb-0">{% if totaal.waarde is not none %}{{ eur(totaal.eind) }}{% else %}—{% endif %}</h4>
+        {% if totaal.waarde is not none %}
+          <small class="text-muted opacity-75">
+            {{ eur(totaal.waarde) }} belegd
+            {%- if totaal.cash_eur %} · {{ eur(totaal.cash_eur) }} cash{% endif %}
+          </small>
+        {% elif totaal.cash_eur %}
+          <small class="text-muted opacity-75">koersen ontbreken · {{ eur(totaal.cash_eur) }} cash</small>
+        {% endif %}
       </div>
     </div>
   </div>
@@ -98,8 +106,11 @@
   <div class="card-header bg-white border-bottom py-3 d-flex justify-content-between align-items-center flex-wrap gap-2">
     <h6 class="mb-0 fw-semibold">
       <i class="bi bi-graph-up me-2 text-success"></i>Waardeontwikkeling
-      <span class="text-muted fw-normal small">· op basis van koershistorie</span>
+      <span class="text-muted fw-normal small">· belegd vermogen, exclusief cash</span>
     </h6>
+    <small class="text-muted d-none d-md-block">
+      <span class="mutatie-legenda"></span> mutatie in het grootboek
+    </small>
     <div class="btn-group btn-group-sm" role="group" aria-label="Periode">
       <button type="button" class="btn btn-outline-secondary periode-btn" data-dagen="7">1W</button>
       <button type="button" class="btn btn-outline-secondary periode-btn" data-dagen="30">1M</button>
@@ -396,12 +407,56 @@
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"
         integrity="sha384-NrKB+u6Ts6AtkIhwPixiKTzgSKNblyhlk0Sohlgar9UHUBzai/sgnNNWWd291xqt"
         crossorigin="anonymous"></script>
+<style>
+  .mutatie-legenda {
+    display: inline-block; width: 0; height: .85em; vertical-align: -.1em;
+    border-left: 2px dashed rgba(13,110,253,.6); margin-right: .45rem;
+  }
+</style>
 <script>
   const wsAll = {{ waarde_serie | tojson }};
   const fmtDatum = iso => { const [, m, d] = iso.split("-"); return `${d}-${m}`; };
 
+  // Huidige (op periode gefilterde) reeks — de marker-plugin en de tooltip
+  // lezen hieruit, zodat markers meeschuiven met de 1W/1M/3M/Alles-knoppen.
+  let wsHuidig = wsAll;
+
+  // Verticale stippellijn + driehoekje op elke dag met een grootboekmutatie.
+  // Eigen mini-plugin i.p.v. chartjs-plugin-annotation: scheelt een tweede
+  // CDN-afhankelijkheid voor twintig regels teken-werk.
+  const mutatieMarkers = {
+    id: "mutatieMarkers",
+    afterDatasetsDraw(chart) {
+      const { ctx, chartArea, scales } = chart;
+      if (!chartArea || !scales.x) return;
+      ctx.save();
+      wsHuidig.forEach((punt, i) => {
+        if (!punt.mutatie) return;
+        const x = scales.x.getPixelForValue(i);
+        if (x < chartArea.left || x > chartArea.right) return;
+        ctx.beginPath();
+        ctx.setLineDash([4, 4]);
+        ctx.lineWidth = 1.5;
+        ctx.strokeStyle = "rgba(13,110,253,.45)";
+        ctx.moveTo(x, chartArea.top);
+        ctx.lineTo(x, chartArea.bottom);
+        ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.fillStyle = "rgba(13,110,253,.85)";
+        ctx.beginPath();                       // driehoekje bovenaan, wijst omlaag
+        ctx.moveTo(x - 4.5, chartArea.top);
+        ctx.lineTo(x + 4.5, chartArea.top);
+        ctx.lineTo(x, chartArea.top + 7);
+        ctx.closePath();
+        ctx.fill();
+      });
+      ctx.restore();
+    },
+  };
+
   const waardeChart = new Chart(document.getElementById("waardeChart"), {
     type: "line",
+    plugins: [mutatieMarkers],
     data: {
       labels: wsAll.map(d => fmtDatum(d.datum)),
       datasets: [
@@ -427,8 +482,13 @@
         legend: { position: "bottom" },
         tooltip: { callbacks: {
           label: c => `${c.dataset.label}: €${(c.parsed.y ?? 0).toLocaleString("nl-NL")}`,
+          footer: items => {
+            const m = items.length ? (wsHuidig[items[0].dataIndex] || {}).mutatie : null;
+            return m ? "Grootboek: " + m : "";
+          },
         } },
       },
+      layout: { padding: { top: 8 } },   // ruimte voor de marker-driehoekjes
       scales: { y: { ticks: { callback: v => "€" + v.toLocaleString("nl-NL") } } },
     },
   });
@@ -440,6 +500,7 @@
       const grens = new Date(laatste.getTime() - dagen * 86400000);
       return wsAll.filter(d => new Date(d.datum) >= grens);
     })();
+    wsHuidig = subset;
     waardeChart.data.labels = subset.map(d => fmtDatum(d.datum));
     waardeChart.data.datasets[0].data = subset.map(d => d.waarde);
     waardeChart.data.datasets[1].data = subset.map(d => d.inleg);

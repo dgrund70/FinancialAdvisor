@@ -100,7 +100,7 @@ def inject_gebruikers():
 # Eén plek om de teksten te onderhouden; elke uitleg: (1) wat het is, (2) wat je eraan hebt.
 BEGRIPPEN = {
     "waarde":        {"titel": "Totale waarde",
-                      "uitleg": "De actuele marktwaarde van al je posities samen. Dit is wat je portefeuille nu waard zou zijn bij verkoop tegen de huidige koersen."},
+                      "uitleg": "Wat er in totaal op je beleggingsrekening staat: de actuele marktwaarde van al je posities plus het cash-saldo. De regel eronder splitst die twee. De grafiek toont alleen het belegde deel — cash staat stil en zou de rendementslijn vertekenen."},
     "dag":           {"titel": "Dag rendement",
                       "uitleg": "De winst of het verlies van vandaag, in euro. Korte-termijn beweging — leuk om te zien, maar het zegt weinig over je echte rendement."},
     "ongerealiseerd":{"titel": "Ongerealiseerd rendement",
@@ -676,20 +676,74 @@ def _portefeuille_twr(accounts, venster=400):
     }
 
 
+# Volgorde bepaalt hoe de mutaties in de grafiek-tooltip worden opgesomd.
+_MUTATIE_LABELS = {
+    "storting":  ("storting",  "stortingen"),
+    "koop":      ("aankoop",   "aankopen"),
+    "verkoop":   ("verkoop",   "verkopen"),
+    "dividend":  ("dividend",  "dividenden"),
+    "kosten":    ("kostenpost", "kostenposten"),
+    "opname":    ("opname",    "opnames"),
+    "correctie": ("correctie", "correcties"),
+}
+
+
+def _mutatie_markers(accounts, grid):
+    """{iso-datum: 'omschrijving'} van de grootboekmutaties per griddag.
+
+    Het grid bestaat uit handelsdagen uit `koers_historie`; een transactie op
+    een weekend- of feestdag (of vóór de eerste dag van de grafiek) schuift naar
+    de eerstvolgende griddag, zodat de marker altijd op een punt in de lijn valt.
+    Mutaties ná de laatste griddag vallen weg.
+    """
+    if not grid:
+        return {}
+    per_dag = {}
+    for account in accounts:
+        for tx in account.transacties:
+            if tx.datum is None:
+                continue
+            i = bisect.bisect_left(grid, tx.datum)
+            if i >= len(grid):
+                continue
+            per_dag.setdefault(grid[i].isoformat(), []).append(tx.type)
+
+    markers = {}
+    for iso, types in per_dag.items():
+        delen = []
+        for soort, (enkel, meervoud) in _MUTATIE_LABELS.items():
+            n = types.count(soort)
+            if n:
+                delen.append(f"{n} {enkel if n == 1 else meervoud}")
+        if delen:
+            markers[iso] = ", ".join(delen)
+    return markers
+
+
 def _portefeuille_waarde_serie(accounts):
     """Waardeontwikkeling voor de dashboardgrafiek, op basis van échte
-    koershistorie (géén advies-snapshots): per dag de holdings-waarde (EUR) en
-    de cumulatieve netto-inleg in die holdings-pot. Front-end filtert dit zelf
-    op periode (week/maand/3 maanden/alles) — dus hier altijd de volle reeks."""
+    koershistorie (géén advies-snapshots): per dag de holdings-waarde (EUR),
+    de cumulatieve netto-inleg in die holdings-pot en — als er die dag iets in
+    het grootboek is geboekt — een korte omschrijving daarvan voor de marker.
+    Front-end filtert dit zelf op periode (week/maand/3 maanden/alles) — dus
+    hier altijd de volle reeks.
+
+    Cash zit hier bewust *niet* in: een stilstaand saldo is geen prestatie van
+    de portefeuille en zou de rendementslijn vertekenen. Het cash-saldo staat
+    als eigen kengetal op het dashboard.
+    """
     reeks = _portefeuille_holdings_reeks(accounts, venster=430)
     grid, navs, flows = reeks["grid"], reeks["navs"], reeks["flows"]
     if len(grid) < 2:
         return []
+    markers = _mutatie_markers(accounts, grid)
     serie, inleg_cum = [], 0.0
     for d, w, f in zip(grid, navs, flows):
         inleg_cum += f
-        serie.append({"datum": d.isoformat(), "waarde": round(w, 2),
-                       "inleg": round(inleg_cum, 2)})
+        iso = d.isoformat()
+        serie.append({"datum": iso, "waarde": round(w, 2),
+                       "inleg": round(inleg_cum, 2),
+                       "mutatie": markers.get(iso)})
     return serie
 
 
