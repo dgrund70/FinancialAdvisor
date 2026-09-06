@@ -11,6 +11,22 @@
   <div class="d-flex gap-2">
     <a href="{{ url_for('dashboard', gebruiker_id=gebruiker.id) }}"
        class="btn btn-outline-secondary btn-sm"><i class="bi bi-arrow-left me-1"></i>Dashboard</a>
+    {% if is_rabo_import_account(account) %}
+    {# Rabo Zakelijk Import: alleen hier: andere rekeningen leveren een ander
+       exportformaat. De knop opent de bestandskiezer en post meteen door naar
+       het voorbeeldscherm; boeken gebeurt pas daar, na bevestiging. #}
+    <form method="post" enctype="multipart/form-data" class="d-inline"
+          action="{{ url_for('rabo_import_voorbeeld', gebruiker_id=gebruiker.id, account_id=account.id) }}">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <input type="file" name="bestand" accept=".csv,text/csv" id="rabo-import-bestand"
+             class="d-none" onchange="this.form.submit()">
+      <button type="button" class="btn btn-outline-primary btn-sm"
+              onclick="document.getElementById('rabo-import-bestand').click()"
+              title="Mutatieoverzicht (CSV) van Rabobank Beheerd Beleggen inlezen">
+        <i class="bi bi-bank me-1"></i>Rabo Zakelijk Import
+      </button>
+    </form>
+    {% endif %}
     <a href="{{ url_for('transactie_toevoegen', gebruiker_id=gebruiker.id, account_id=account.id) }}"
        class="btn btn-primary btn-sm"><i class="bi bi-plus-lg me-1"></i>Transactie</a>
   </div>

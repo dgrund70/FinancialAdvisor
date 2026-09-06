@@ -1,0 +1,121 @@
+{% extends "base.html" %}
+{% block content %}
+
+{% macro bedrag(v, valuta) %}{% if v is none %}—{% elif not valuta or valuta == 'EUR' %}€&nbsp;{{ "%.2f"|format(v) }}{% else %}{{ "%.2f"|format(v) }}&nbsp;{{ valuta }}{% endif %}{% endmacro %}
+
+{% macro regeltabel(regels, toon_boekdatum=True) %}
+<div class="table-responsive">
+  <table class="table table-sm table-hover align-middle mb-0">
+    <thead class="table-light">
+      <tr>
+        <th>Bank</th>
+        {% if toon_boekdatum %}<th>Boekt op</th>{% endif %}
+        <th>Type</th>
+        <th>Fonds</th>
+        <th class="text-end">Aantal</th>
+        <th class="text-end">Prijs</th>
+        <th class="text-end">Bedrag</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for r in regels %}
+      <tr>
+        <td class="text-muted small text-nowrap">
+          {{ r.bron_datum.strftime('%d-%m-%Y') }}
+          <span class="text-body-tertiary">{{ r.tijd[:5] }}</span>
+        </td>
+        {% if toon_boekdatum %}
+        <td class="small text-nowrap">{{ r.boek_datum.strftime('%d-%m-%Y') }}</td>
+        {% endif %}
+        <td>
+          <span class="badge {{ 'bg-danger' if r.type in ('koop','kosten','opname') else 'bg-success' }} bg-opacity-10 text-dark border">{{ r.type }}</span>
+        </td>
+        <td class="small">{{ r.fonds or '—' }}
+          {% if r.ticker %}<span class="text-muted">· {{ r.ticker }}</span>{% endif %}
+        </td>
+        <td class="text-end small">{{ r.aantal | compact_float if r.aantal else '—' }}</td>
+        <td class="text-end small">{{ bedrag(r.prijs, r.valuta) if r.prijs else '—' }}</td>
+        <td class="text-end small fw-semibold">{{ bedrag(r.bedrag, r.valuta) }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endmacro %}
+
+<div class="d-flex align-items-center justify-content-between mb-3 flex-wrap gap-2">
+  <h5 class="mb-0 fw-semibold">
+    <i class="bi bi-bank me-2 text-primary"></i>Rabo Zakelijk Import
+    <span class="text-muted fw-normal">· {{ account.naam }}</span>
+  </h5>
+  <a href="{{ url_for('transacties_overzicht', gebruiker_id=gebruiker.id, account_id=account.id) }}"
+     class="btn btn-outline-secondary btn-sm"><i class="bi bi-arrow-left me-1"></i>Grootboek</a>
+</div>
+
+<p class="text-muted small">
+  Gelezen uit <span class="fw-semibold">{{ bestandsnaam }}</span>.
+  Er is nog <span class="fw-semibold">niets</span> geboekt — controleer hieronder en bevestig.
+  Fondsmutaties krijgen de eff.nota-datum (de dag ná de bankdatum); stortingen en
+  opnames blijven op de dag zelf staan.
+</p>
+
+{# ---------------------------------------------------------------- nieuw #}
+<div class="card border-0 shadow-sm mb-3">
+  <div class="card-header bg-white border-0 pt-3 d-flex align-items-center justify-content-between flex-wrap gap-2">
+    <span class="fw-semibold">
+      <i class="bi bi-plus-circle me-1 text-success"></i>Wordt geboekt
+      <span class="badge bg-success bg-opacity-25 text-dark border ms-1">{{ nieuw|length }}</span>
+    </span>
+  </div>
+  {% if nieuw %}
+    {{ regeltabel(nieuw) }}
+    <div class="card-body pt-3">
+      <form method="post"
+            action="{{ url_for('rabo_import_bevestigen', gebruiker_id=gebruiker.id, account_id=account.id) }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <input type="hidden" name="payload" value="{{ payload }}">
+        <button type="submit" class="btn btn-primary">
+          <i class="bi bi-check2-circle me-1"></i>{{ nieuw|length }} mutatie(s) boeken
+        </button>
+        <a href="{{ url_for('transacties_overzicht', gebruiker_id=gebruiker.id, account_id=account.id) }}"
+           class="btn btn-link text-muted">Annuleren</a>
+      </form>
+    </div>
+  {% else %}
+    <div class="card-body text-muted">
+      Niets nieuws — alles uit dit bestand staat al in het grootboek.
+    </div>
+  {% endif %}
+</div>
+
+{# ------------------------------------------------------------ al geboekt #}
+{% if dubbel %}
+<div class="card border-0 shadow-sm mb-3">
+  <div class="card-header bg-white border-0 pt-3">
+    <span class="fw-semibold text-muted">
+      <i class="bi bi-clock-history me-1"></i>Stond er al
+      <span class="badge bg-secondary bg-opacity-25 text-dark border ms-1">{{ dubbel|length }}</span>
+    </span>
+  </div>
+  {{ regeltabel(dubbel) }}
+</div>
+{% endif %}
+
+{# ----------------------------------------------------------- overgeslagen #}
+{% if overgeslagen %}
+<div class="card border-0 shadow-sm mb-3">
+  <div class="card-header bg-white border-0 pt-3">
+    <span class="fw-semibold text-warning-emphasis">
+      <i class="bi bi-exclamation-triangle me-1"></i>Overgeslagen
+      <span class="badge bg-warning bg-opacity-25 text-dark border ms-1">{{ overgeslagen|length }}</span>
+    </span>
+  </div>
+  <ul class="list-group list-group-flush small">
+    {% for melding in overgeslagen %}
+    <li class="list-group-item text-muted">{{ melding }}</li>
+    {% endfor %}
+  </ul>
+</div>
+{% endif %}
+
+{% endblock %}

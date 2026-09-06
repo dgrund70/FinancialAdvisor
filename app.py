@@ -7,6 +7,7 @@ import secrets
 import subprocess
 import sys
 import threading
+from collections import Counter
 from datetime import date, datetime, timedelta
 from itertools import count
 from pathlib import Path
@@ -33,6 +34,7 @@ from models import (Advies, Aanbeveling, BenchmarkPunt, BENCHMARKS,
 from projectie import (cash_saldi, herbereken_alles, herbereken_positie,
                        na_transactie_wijziging)
 from fetch_prices import is_crypto
+import rabo_import
 
 try:
     import markdown as _md
@@ -85,6 +87,9 @@ app = Flask(__name__)
 app.config["SECRET_KEY"] = _laad_secret_key()
 app.config["SQLALCHEMY_DATABASE_URI"] = f"sqlite:///{DB_PATH}"
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
+# Ruim voor een mutatieoverzicht (tientallen KB), krap genoeg om een
+# per ongeluk geuploade portefeuille-dump meteen te weigeren.
+app.config["MAX_CONTENT_LENGTH"] = 2 * 1024 * 1024
 
 db.init_app(app)
 csrf = CSRFProtect(app)
@@ -1309,6 +1314,161 @@ def transactie_verwijderen(gebruiker_id, transactie_id):
     flash("Transactie verwijderd.", "info")
     return redirect(url_for("transacties_overzicht",
                             gebruiker_id=gebruiker_id, account_id=account_id))
+
+
+# ---------------------------------------------------------------------------
+# Rabo Zakelijk Import — mutatieoverzicht (CSV) inlezen in het grootboek
+# ---------------------------------------------------------------------------
+# Alleen zichtbaar op het grootboek van de zakelijke Rabo-rekening; andere
+# accounts hebben een ander exportformaat en zouden er niets aan hebben.
+
+RABO_IMPORT_ACCOUNT = "Rabobank Zakelijk"
+
+
+def is_rabo_import_account(account):
+    return bool(account) and account.naam.strip().lower() == RABO_IMPORT_ACCOUNT.lower()
+
+
+app.jinja_env.globals["is_rabo_import_account"] = is_rabo_import_account
+
+
+def _rabo_splits(account, regels):
+    """Verdeel de gelezen regels in 'nieuw' en 'staat er al'.
+
+    Vergelijkt op aantal per signatuur, niet op bestaan: de inleg van 28-08
+    stond als drie identieke boekingen van 50.000 op het afschrift, en die
+    moeten alle drie geboekt worden.
+    """
+    bestaand = Counter(
+        rabo_import.transactie_signatuur(tx)
+        for tx in Transactie.query.filter_by(broker_account_id=account.id).all()
+    )
+    nieuw, dubbel, gezien = [], [], Counter()
+    for regel in regels:
+        sig = rabo_import.regel_signatuur(regel)
+        gezien[sig] += 1
+        if gezien[sig] <= bestaand.get(sig, 0):
+            dubbel.append(regel)
+        else:
+            nieuw.append(regel)
+    return nieuw, dubbel
+
+
+def _rabo_serialiseer(regels):
+    """Regels naar JSON voor het verborgen veld van het bevestigingsformulier."""
+    uit = []
+    for r in regels:
+        kopie = dict(r)
+        kopie["boek_datum"] = r["boek_datum"].isoformat()
+        kopie["bron_datum"] = r["bron_datum"].isoformat()
+        uit.append(kopie)
+    return json.dumps(uit, separators=(",", ":"))
+
+
+def _rabo_deserialiseer(payload):
+    regels = json.loads(payload)
+    for r in regels:
+        r["boek_datum"] = date.fromisoformat(r["boek_datum"])
+        r["bron_datum"] = date.fromisoformat(r["bron_datum"])
+    return regels
+
+
+@app.route("/gebruiker/<int:gebruiker_id>/account/<int:account_id>/rabo-import",
+           methods=["POST"])
+def rabo_import_voorbeeld(gebruiker_id, account_id):
+    """Stap 1: bestand inlezen en tonen wat er geboekt zou worden."""
+    gebruiker = Gebruiker.query.get_or_404(gebruiker_id)
+    account   = BrokerAccount.query.get_or_404(account_id)
+    terug = redirect(url_for("transacties_overzicht",
+                             gebruiker_id=gebruiker_id, account_id=account_id))
+    if not _autoriseer_account(account, gebruiker_id):
+        return redirect(url_for("dashboard", gebruiker_id=gebruiker_id))
+    if not is_rabo_import_account(account):
+        flash("Rabo Zakelijk Import is alleen beschikbaar op de zakelijke "
+              "Rabo-rekening.", "danger")
+        return terug
+
+    bestand = request.files.get("bestand")
+    if bestand is None or not bestand.filename:
+        flash("Geen bestand gekozen.", "danger")
+        return terug
+    if not bestand.filename.lower().endswith(".csv"):
+        flash("Kies het CSV-mutatieoverzicht zoals Rabo het levert "
+              "(Mutatieoverzicht_…csv).", "danger")
+        return terug
+
+    try:
+        regels, overgeslagen = rabo_import.parse(bestand.read())
+    except rabo_import.ImportFout as fout:
+        flash(str(fout), "danger")
+        return terug
+
+    nieuw, dubbel = _rabo_splits(account, regels)
+    return render_template("rabo_import.html",
+                           gebruiker=gebruiker, account=account,
+                           bestandsnaam=bestand.filename,
+                           nieuw=nieuw, dubbel=dubbel,
+                           overgeslagen=overgeslagen,
+                           payload=_rabo_serialiseer(nieuw))
+
+
+@app.route("/gebruiker/<int:gebruiker_id>/account/<int:account_id>/rabo-import/bevestigen",
+           methods=["POST"])
+def rabo_import_bevestigen(gebruiker_id, account_id):
+    """Stap 2: pas ná bevestiging schrijven we naar het grootboek."""
+    account = BrokerAccount.query.get_or_404(account_id)
+    terug = redirect(url_for("transacties_overzicht",
+                             gebruiker_id=gebruiker_id, account_id=account_id))
+    if not _autoriseer_account(account, gebruiker_id):
+        return redirect(url_for("dashboard", gebruiker_id=gebruiker_id))
+    if not is_rabo_import_account(account):
+        flash("Rabo Zakelijk Import is alleen beschikbaar op de zakelijke "
+              "Rabo-rekening.", "danger")
+        return terug
+
+    try:
+        regels = _rabo_deserialiseer(request.form.get("payload", "[]"))
+    except (ValueError, TypeError):
+        flash("De import is verlopen of onleesbaar. Kies het bestand opnieuw.",
+              "danger")
+        return terug
+
+    # Nog een keer tegen het grootboek houden: tussen voorbeeld en bevestiging
+    # kan er iets geboekt zijn (of is er twee keer op de knop gedrukt).
+    nieuw, dubbel = _rabo_splits(account, regels)
+    if not nieuw:
+        flash("Alle mutaties uit dit bestand stonden al in het grootboek. "
+              "Er is niets toegevoegd.", "info")
+        return terug
+
+    tickers = set()
+    for regel in nieuw:
+        db.session.add(Transactie(
+            broker_account_id=account.id,
+            type=regel["type"],
+            ticker=regel["ticker"],
+            aantal=regel["aantal"],
+            prijs=regel["prijs"],
+            bedrag=regel["bedrag"] if regel["type"] in
+                   ("storting", "opname", "dividend", "kosten") else None,
+            kosten=regel["kosten"] or 0.0,
+            valuta=regel["valuta"] or "EUR",
+            datum=regel["boek_datum"],
+            notitie=regel["notitie"][:200],
+        ))
+        if regel["ticker"]:
+            tickers.add(regel["ticker"])
+
+    db.session.flush()
+    if tickers:
+        na_transactie_wijziging(account.id, *tickers)
+    db.session.commit()
+
+    melding = f"{len(nieuw)} mutatie(s) geboekt."
+    if dubbel:
+        melding += f" {len(dubbel)} stond(en) al in het grootboek en zijn overgeslagen."
+    flash(melding, "success")
+    return terug
 
 
 @app.route("/gebruiker/<int:gebruiker_id>/herbereken", methods=["POST"])
