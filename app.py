@@ -1604,7 +1604,9 @@ _taak_teller = count(1)
 def _draai_taak(taak_id, cmd, timeout, klaar_bericht):
     cat, msg = "success", klaar_bericht
     try:
-        subprocess.run(cmd, timeout=timeout, check=True)
+        commands = cmd if cmd and isinstance(cmd[0], (list, tuple)) else [cmd]
+        for command in commands:
+            subprocess.run(command, timeout=timeout, check=True)
     except subprocess.TimeoutExpired:
         cat, msg = "warning", "Bewerking duurde te lang en is afgebroken."
     except subprocess.CalledProcessError as e:
@@ -1658,6 +1660,27 @@ def benchmark_verversen():
         "benchmark",
         [sys.executable, str(BASE_DIR / "fetch_benchmark.py")],
         timeout=120, klaar_bericht="Benchmark-historie bijgewerkt.")
+    return {"taak_id": taak_id, "al_bezig": al_bezig}
+
+
+@app.route("/gebruiker/<int:gebruiker_id>/gegevens/verversen", methods=["POST"])
+def gegevens_verversen(gebruiker_id):
+    """Werk alle databronnen vanuit één centrale gebruikersactie bij."""
+    Gebruiker.query.get_or_404(gebruiker_id)
+    scripts = [
+        "fetch_prices.py",
+        "fetch_benchmark.py",
+        "fetch_historie.py",
+        "fetch_fundamentals.py",
+        "fetch_news.py",
+    ]
+    commands = [[sys.executable, str(BASE_DIR / script)] for script in scripts]
+    taak_id, al_bezig = _start_taak(
+        "alle-gegevens",
+        commands,
+        timeout=180,
+        klaar_bericht="Koersen, benchmark, risico-data, fundamentals en nieuws bijgewerkt.",
+    )
     return {"taak_id": taak_id, "al_bezig": al_bezig}
 
 

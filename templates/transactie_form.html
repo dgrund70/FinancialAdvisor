@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% block title %}Transactie – Beleggingsdashboard{% endblock %}
 {% block content %}
 
 {% set is_edit = tx is not none %}
@@ -7,11 +8,11 @@
                else url_for('transactie_toevoegen', gebruiker_id=gebruiker.id, account_id=account.id) %}
 
 <div class="d-flex align-items-center justify-content-between mb-4 flex-wrap gap-2">
-  <h5 class="mb-0 fw-semibold">
+  <h1 class="h5 mb-0 fw-semibold">
     <i class="bi bi-journal-plus me-2 text-primary"></i>
     {{ 'Transactie bewerken' if is_edit else 'Transactie toevoegen' }}
     <span class="text-muted fw-normal">· {{ account.naam }}</span>
-  </h5>
+  </h1>
   <a href="{{ url_for('transacties_overzicht', gebruiker_id=gebruiker.id, account_id=account.id) }}"
      class="btn btn-outline-secondary btn-sm">
     <i class="bi bi-x-lg me-1"></i>Annuleren

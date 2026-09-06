@@ -1,14 +1,16 @@
 {% extends "base.html" %}
+{% block title %}Positietags – Beleggingsdashboard{% endblock %}
 {% block content %}
 
 <div class="row justify-content-center">
   <div class="col-12 col-md-7 col-lg-5">
 
     <div class="d-flex align-items-center mb-3 gap-2">
-      <a href="{{ url_for('dashboard', gebruiker_id=gebruiker.id) }}" class="btn btn-link p-0 text-muted">
+      <a href="{{ url_for('dashboard', gebruiker_id=gebruiker.id) }}" class="btn btn-link p-0 text-muted icon-action"
+         aria-label="Terug naar portfolio">
         <i class="bi bi-arrow-left"></i>
       </a>
-      <h5 class="mb-0 fw-semibold">Tags — {{ pos.ticker }}</h5>
+      <h1 class="h5 mb-0 fw-semibold">Tags — {{ pos.ticker }}</h1>
     </div>
 
     <div class="card border-0 shadow-sm">

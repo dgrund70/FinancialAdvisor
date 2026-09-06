@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% block title %}Analyse – Beleggingsdashboard{% endblock %}
 {% from "macros.html" import uitleg with context %}
 {% block content %}
 
@@ -31,13 +32,13 @@
 {% endmacro %}
 
 <div class="d-flex justify-content-between align-items-center mb-4 flex-wrap gap-2">
-  <h5 class="mb-0 fw-semibold"><i class="bi bi-pie-chart me-2 text-primary"></i>Analyse</h5>
+  <h1 class="h5 mb-0 fw-semibold"><i class="bi bi-pie-chart me-2 text-primary"></i>Analyse</h1>
 </div>
 
 {% if totaal is none %}
 <div class="card border-0 shadow-sm"><div class="card-body text-center py-5 text-muted">
   <i class="bi bi-pie-chart fs-1 d-block mb-3"></i>
-  <p class="mb-0">Nog geen holdings met koers. Voeg posities toe en ververs de koersen.</p>
+  <p class="mb-0">Nog geen holdings met koers. Voeg posities toe en werk de gegevens bij via de bovenbalk.</p>
 </div></div>
 {% else %}
 
@@ -49,7 +50,7 @@
       <p class="text-muted small mb-1"><i class="bi bi-graph-up me-1"></i>TWR (geann.){{ uitleg('twr') }}</p>
       <h4 class="fw-bold mb-0">{% if twr and twr.geannualiseerd is not none %}{{ pct1(twr.geannualiseerd * 100) }}{% else %}—{% endif %}</h4>
       {% if not twr or twr.te_weinig_data %}
-        <small class="text-muted">ververs risico-data</small>
+        <small class="text-muted">werk gegevens bij via de bovenbalk</small>
       {% endif %}
     </div></div>
   </div>
@@ -67,10 +68,6 @@
 {# ── Risico ──────────────────────────────────────────────────── #}
 <div class="d-flex justify-content-between align-items-center mb-2 flex-wrap gap-2">
   <p class="text-uppercase text-muted small fw-semibold mb-0" style="letter-spacing:.05em">Risico</p>
-  <form method="post" action="{{ url_for('historie_verversen') }}" data-taak>
-    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-    <button class="btn btn-outline-secondary btn-sm"><i class="bi bi-activity me-1"></i>Ververs risico-data</button>
-  </form>
 </div>
 <div class="row g-3 mb-2">
   <div class="col-6 col-lg">
@@ -140,10 +137,6 @@
 {# ── Allocaties ──────────────────────────────────────────────── #}
 <div class="d-flex justify-content-between align-items-center mb-2 flex-wrap gap-2">
   <p class="text-uppercase text-muted small fw-semibold mb-0" style="letter-spacing:.05em">Allocatie</p>
-  <form method="post" action="{{ url_for('fundamentals_verversen', gebruiker_id=gebruiker.id) }}" data-taak>
-    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-    <button class="btn btn-outline-secondary btn-sm"><i class="bi bi-bar-chart-line me-1"></i>Ververs fundamentals</button>
-  </form>
 </div>
 <div class="row g-3 mb-3">
   {{ alloc_card('Sector', 'bi-grid-1x2', sector_alloc, 'primary') }}
@@ -153,7 +146,7 @@
 </div>
 
 {% if not heeft_fundamentals %}
-<p class="text-muted small">Sector- en regio-indeling vereisen fundamentals — klik op <strong>Ververs fundamentals</strong>.</p>
+<p class="text-muted small">Sector- en regio-indeling vereisen fundamentals — werk de gegevens bij via de bovenbalk.</p>
 {% endif %}
 
 {# ── Volatiliteit per holding + correlatie ───────────────────── #}

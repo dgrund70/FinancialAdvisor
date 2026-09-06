@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% block title %}Advies – Beleggingsdashboard{% endblock %}
 {% from "macros.html" import uitleg with context %}
 {% block content %}
 
@@ -66,20 +67,8 @@
 
 {# ── Toolbar ──────────────────────────────────────────────────── #}
 <div class="d-flex justify-content-between align-items-center mb-4 flex-wrap gap-2">
-  <h5 class="mb-0 fw-semibold"><i class="bi bi-lightbulb me-2 text-warning"></i>Adviesmodule</h5>
+  <h1 class="h5 mb-0 fw-semibold"><i class="bi bi-lightbulb me-2 text-warning"></i>Adviesmodule</h1>
   <div class="d-flex gap-2 flex-wrap">
-    <form method="post" action="{{ url_for('nieuws_verversen', gebruiker_id=gebruiker.id) }}" data-taak>
-      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-      <button class="btn btn-outline-secondary btn-sm">
-        <i class="bi bi-newspaper me-1"></i>Ververs nieuws
-      </button>
-    </form>
-    <form method="post" action="{{ url_for('fundamentals_verversen', gebruiker_id=gebruiker.id) }}" data-taak>
-      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-      <button class="btn btn-outline-secondary btn-sm">
-        <i class="bi bi-bar-chart-line me-1"></i>Ververs fundamentals
-      </button>
-    </form>
     <form method="post" action="{{ url_for('advies_genereer', gebruiker_id=gebruiker.id) }}" data-taak>
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
       <button class="btn btn-primary btn-sm" {{ 'disabled' if not heeft_api_key }}>
@@ -119,14 +108,15 @@
             </td>
             <td class="d-none d-md-table-cell text-muted small">
               {% if v.fund and v.fund.sector %}{{ v.fund.sector }}{% if v.fund.pe %} · K/W {{ "%.1f"|format(v.fund.pe) }}{% endif %}{% if v.fund.aanbeveling %} · {{ v.fund.aanbeveling }}{% endif %}
-              {% else %}<span class="fst-italic">nog geen fundamentals — klik "Ververs fundamentals"</span>{% endif %}
+              {% else %}<span class="fst-italic">nog geen fundamentals — werk gegevens bij via de bovenbalk</span>{% endif %}
             </td>
             <td class="text-end">
               <form method="post"
                     action="{{ url_for('volglijst_verwijderen', gebruiker_id=gebruiker.id, item_id=v.item.id) }}"
                     onsubmit="return confirm('{{ v.item.ticker }} van de volglijst verwijderen?')">
                 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                <button class="btn btn-link btn-sm text-danger p-0" title="Verwijder"><i class="bi bi-trash3"></i></button>
+                <button class="btn btn-link btn-sm text-danger p-0 icon-action" title="Verwijder"
+                        aria-label="{{ v.item.ticker }} van volglijst verwijderen"><i class="bi bi-trash3"></i></button>
               </form>
             </td>
           </tr>
@@ -192,7 +182,7 @@
             {% if t.rendement is not none %}
               {{ '+' if t.rendement > 0 else '' }}{{ t.rendement }}%
             {% else %}
-              <span class="text-muted small">ververs koersen</span>
+              <span class="text-muted small">werk gegevens bij</span>
             {% endif %}
           </td>
         </tr>
@@ -237,7 +227,7 @@
         <i class="bi bi-lightbulb fs-1 d-block mb-3"></i>
         <p class="mb-3">Nog geen advies gegenereerd.</p>
         {% if heeft_api_key %}
-          <p class="small">Ververs eerst het nieuws, dan klik op <strong>Genereer advies</strong>.</p>
+          <p class="small">Werk eerst de gegevens bij via de bovenbalk en klik daarna op <strong>Genereer advies</strong>.</p>
         {% else %}
           <p class="small">Stel <code>ANTHROPIC_API_KEY</code> in om te beginnen.</p>
         {% endif %}

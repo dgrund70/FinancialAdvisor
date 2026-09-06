@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% block title %}Import controleren – Beleggingsdashboard{% endblock %}
 {% block content %}
 
 {% macro bedrag(v, valuta) %}{% if v is none %}—{% elif not valuta or valuta == 'EUR' %}€&nbsp;{{ "%.2f"|format(v) }}{% else %}{{ "%.2f"|format(v) }}&nbsp;{{ valuta }}{% endif %}{% endmacro %}
@@ -44,10 +45,10 @@
 {% endmacro %}
 
 <div class="d-flex align-items-center justify-content-between mb-3 flex-wrap gap-2">
-  <h5 class="mb-0 fw-semibold">
+  <h1 class="h5 mb-0 fw-semibold">
     <i class="bi bi-bank me-2 text-primary"></i>Rabo Zakelijk Import
     <span class="text-muted fw-normal">· {{ account.naam }}</span>
-  </h5>
+  </h1>
   <a href="{{ url_for('transacties_overzicht', gebruiker_id=gebruiker.id, account_id=account.id) }}"
      class="btn btn-outline-secondary btn-sm"><i class="bi bi-arrow-left me-1"></i>Grootboek</a>
 </div>

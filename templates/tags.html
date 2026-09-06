@@ -1,14 +1,16 @@
 {% extends "base.html" %}
+{% block title %}Tags – Beleggingsdashboard{% endblock %}
 {% block content %}
 
 <div class="row justify-content-center">
   <div class="col-12 col-md-7 col-lg-5">
 
     <div class="d-flex align-items-center mb-3 gap-2">
-      <a href="{{ url_for('dashboard', gebruiker_id=gebruiker.id) }}" class="btn btn-link p-0 text-muted">
+      <a href="{{ url_for('dashboard', gebruiker_id=gebruiker.id) }}" class="btn btn-link p-0 text-muted icon-action"
+         aria-label="Terug naar portfolio">
         <i class="bi bi-arrow-left"></i>
       </a>
-      <h5 class="mb-0 fw-semibold"><i class="bi bi-tags me-2 text-primary"></i>Tags beheren</h5>
+      <h1 class="h5 mb-0 fw-semibold"><i class="bi bi-tags me-2 text-primary"></i>Tags beheren</h1>
     </div>
 
     <div class="card border-0 shadow-sm mb-3">
@@ -27,7 +29,8 @@
                 class="ms-auto"
                 onsubmit="return confirm('Tag \'{{ tag.naam }}\' verwijderen?')">
             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-            <button class="btn btn-link btn-sm text-danger p-0" title="Verwijder">
+            <button class="btn btn-link btn-sm text-danger p-0 icon-action" title="Verwijder"
+                    aria-label="Tag {{ tag.naam }} verwijderen">
               <i class="bi bi-trash3"></i>
             </button>
           </form>

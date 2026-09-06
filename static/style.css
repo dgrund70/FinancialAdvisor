@@ -4,6 +4,19 @@
 .navbar-brand { letter-spacing: -.3px; }
 .nav-link { font-size: .9rem; }
 
+.icon-action {
+  align-items: center;
+  display: inline-flex;
+  justify-content: center;
+  min-height: 2.75rem;
+  min-width: 2.75rem;
+}
+
+@media (max-width: 767.98px) {
+  .navbar-brand { font-size: 1rem; }
+  .navbar-collapse .nav-link { padding: .65rem .25rem; }
+}
+
 .card { border-radius: .75rem; }
 .card-header { border-radius: .75rem .75rem 0 0 !important; }
 

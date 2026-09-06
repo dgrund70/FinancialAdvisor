@@ -1,6 +1,8 @@
 {% extends "base.html" %}
+{% block title %}Portfolio – Beleggingsdashboard{% endblock %}
 {% from "macros.html" import uitleg with context %}
 {% block content %}
+<h1 class="visually-hidden">Portfolio van {{ gebruiker.naam }}</h1>
 
 {# ── Macro's ──────────────────────────────────────────────────── #}
 {% macro kleur(v) %}{{ 'pos' if v is not none and v > 0 else 'neg' if v is not none and v < 0 else 'text-muted' }}{% endmacro %}
@@ -93,7 +95,7 @@
       <div class="card-body">
         <p class="text-muted small mb-1"><i class="bi bi-graph-up me-1"></i>Rendement (TWR, jaar){{ uitleg('twr') }}</p>
         <h4 class="fw-bold mb-0 {{ kleur(totaal.twr) }}">{{ xirr_fmt(totaal.twr) }}</h4>
-        {% if totaal.twr is none %}<small class="text-muted">ververs risico-data op Analyse</small>{% endif %}
+        {% if totaal.twr is none %}<small class="text-muted">werk gegevens bij via de bovenbalk</small>{% endif %}
       </div>
     </div>
   </div>
@@ -122,7 +124,10 @@
     </div>
   </div>
   <div class="card-body">
-    <canvas id="waardeChart" height="80"></canvas>
+    <canvas id="waardeChart" height="80" role="img"
+            aria-label="Grafiek van de ontwikkeling van het belegde vermogen">
+      Waardeontwikkeling van het belegde vermogen. De exacte waarden staan in het portefeuilleoverzicht.
+    </canvas>
   </div>
 </div>
 {% endif %}
@@ -136,21 +141,7 @@
       <i class="bi bi-exclamation-circle me-1"></i>Nog geen koersen geladen
     {% endif %}
   </small>
-  <div class="d-flex gap-2 flex-wrap">
-    <form method="post" action="{{ url_for('prijzen_verversen') }}" data-taak>
-      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-      <input type="hidden" name="gebruiker_id" value="{{ gebruiker.id }}">
-      <button class="btn btn-outline-secondary btn-sm">
-        <i class="bi bi-arrow-clockwise me-1"></i>Ververs koersen
-      </button>
-    </form>
-    <form method="post" action="{{ url_for('benchmark_verversen') }}" data-taak>
-      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-      <button class="btn btn-outline-secondary btn-sm">
-        <i class="bi bi-trophy me-1"></i>Ververs benchmark
-      </button>
-    </form>
-  </div>
+  <small class="text-muted">Alle databronnen werk je centraal bij via de bovenbalk.</small>
 </div>
 
 {# ── Benchmarkvergelijking (deposit-matched XIRR) ───────────────── #}
@@ -202,7 +193,7 @@
 {% elif heeft_flows %}
 <div class="alert alert-light border small d-flex align-items-center gap-2">
   <i class="bi bi-trophy text-warning"></i>
-  <span>Benchmarkvergelijking: nog geen indexkoersen geladen — klik op <strong>Ververs benchmark</strong>.</span>
+  <span>Benchmarkvergelijking: nog geen indexkoersen geladen — werk de gegevens bij via de bovenbalk.</span>
 </div>
 {% endif %}
 
@@ -231,20 +222,22 @@
         <i class="bi bi-journals me-1"></i>Grootboek
       </a>
       <a href="{{ url_for('transactie_toevoegen', gebruiker_id=gebruiker.id, account_id=d.account.id) }}"
-         class="btn btn-outline-secondary btn-sm">
-        <i class="bi bi-journal-plus me-1"></i>Transactie
-      </a>
-      <a href="{{ url_for('positie_toevoegen', gebruiker_id=gebruiker.id, account_id=d.account.id) }}"
-         class="btn btn-outline-primary btn-sm">
-        <i class="bi bi-plus-lg me-1"></i>Positie
+         class="btn btn-primary btn-sm">
+        <i class="bi bi-journal-plus me-1"></i>Transactie boeken
       </a>
       {# Account verwijderen: achter kebab-menu om per ongeluk klikken te voorkomen #}
       <div class="dropdown">
         <button class="btn btn-link btn-sm text-secondary p-1" data-bs-toggle="dropdown"
-                title="Meer opties" aria-expanded="false">
+                title="Meer opties" aria-label="Meer opties voor {{ d.account.naam }}" aria-expanded="false">
           <i class="bi bi-three-dots-vertical"></i>
         </button>
         <ul class="dropdown-menu dropdown-menu-end shadow-sm">
+          <li>
+            <a class="dropdown-item" href="{{ url_for('positie_toevoegen', gebruiker_id=gebruiker.id, account_id=d.account.id) }}">
+              <i class="bi bi-box-arrow-in-down me-2"></i>Bestaande positie invoeren…
+            </a>
+          </li>
+          <li><hr class="dropdown-divider"></li>
           <li>
             <form method="post"
                   action="{{ url_for('account_verwijderen', gebruiker_id=gebruiker.id, account_id=d.account.id) }}"
@@ -294,7 +287,8 @@
               <span class="badge bg-primary bg-opacity-10 text-primary border border-primary-subtle me-1">{{ tag.naam }}</span>
             {% endfor %}
             <a href="{{ url_for('positie_tags_bewerken', gebruiker_id=gebruiker.id, pos_id=r.pos.id) }}"
-               class="btn btn-link btn-sm p-0 text-muted" title="Tags bewerken">
+               class="btn btn-link btn-sm p-0 text-muted icon-action" title="Tags bewerken"
+               aria-label="Tags van {{ r.pos.ticker }} bewerken">
               <i class="bi bi-pencil-square"></i>
             </a>
           </td>
@@ -328,14 +322,16 @@
           <td class="text-end">
             <div class="d-inline-flex gap-2 align-items-center">
               <a href="{{ url_for('positie_bewerken', gebruiker_id=gebruiker.id, pos_id=r.pos.id) }}"
-                 class="btn btn-link btn-sm text-secondary p-0" title="Positie bewerken">
+                 class="btn btn-link btn-sm text-secondary p-0 icon-action" title="Positie bewerken"
+                 aria-label="{{ r.pos.ticker }} bewerken">
                 <i class="bi bi-pencil"></i>
               </a>
               <form method="post"
                     action="{{ url_for('positie_verwijderen', gebruiker_id=gebruiker.id, pos_id=r.pos.id) }}"
                     onsubmit="return confirm('{{ r.pos.ticker }} verwijderen?')">
                 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                <button class="btn btn-link btn-sm text-danger p-0" title="Verwijder">
+                <button class="btn btn-link btn-sm text-danger p-0 icon-action" title="Verwijder"
+                        aria-label="{{ r.pos.ticker }} verwijderen">
                   <i class="bi bi-trash3"></i>
                 </button>
               </form>
@@ -366,9 +362,8 @@
   </div>
   {% else %}
   <div class="card-body text-muted small text-center py-3">
-    Nog geen holdings —
-    <a href="{{ url_for('positie_toevoegen', gebruiker_id=gebruiker.id, account_id=d.account.id) }}">voeg een positie toe</a>
-    of <a href="{{ url_for('transactie_toevoegen', gebruiker_id=gebruiker.id, account_id=d.account.id) }}">boek een transactie</a>.
+    Nog geen beleggingen —
+    <a href="{{ url_for('transactie_toevoegen', gebruiker_id=gebruiker.id, account_id=d.account.id) }}">boek je eerste transactie</a>.
   </div>
   {% endif %}
 
