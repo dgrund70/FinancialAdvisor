@@ -154,7 +154,27 @@ def compact_float(value):
         return "—"
     if value == int(value):
         return str(int(value))
-    return f"{value:.4f}".rstrip("0").rstrip(".")
+    return f"{value:.4f}".rstrip("0").rstrip(".").replace(".", ",")
+
+
+@app.template_filter("bedrag_nl")
+def bedrag_nl(value, valuta="EUR"):
+    """Formatteer een bedrag met Nederlandse cijfer- en valutanotatie."""
+    if value is None:
+        return "—"
+    getal = f"{value:,.2f}".translate(str.maketrans({",": ".", ".": ","}))
+    if not valuta or valuta.upper() == "EUR":
+        return f"€\u00a0{getal}"
+    return f"{getal}\u00a0{valuta.upper()}"
+
+
+@app.template_filter("pct_nl")
+def pct_nl(value, decimalen=1):
+    """Formatteer een percentage met decimale komma en expliciet plusteken."""
+    if value is None:
+        return "—"
+    teken = "+" if value > 0 else ""
+    return f"{teken}{value:.{decimalen}f}".replace(".", ",") + "%"
 
 
 @app.template_filter("markdown")

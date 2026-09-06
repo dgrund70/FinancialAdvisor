@@ -20,7 +20,42 @@
 .card { border-radius: .75rem; }
 .card-header { border-radius: .75rem .75rem 0 0 !important; }
 
+.portfolio-hero-value { font-size: clamp(1.6rem, 6vw, 2.75rem); }
+.portfolio-hero-day { font-size: clamp(1.05rem, 3.5vw, 1.5rem); }
+.metric-compact .fw-bold { font-size: 1.1rem; }
+
 tfoot td { font-size: .9rem; }
+
+.correlatie-matrix th:first-child {
+  background-color: var(--bs-table-bg, #f8f9fa);
+  box-shadow: 2px 0 0 var(--bs-border-color);
+  left: 0;
+  position: sticky;
+  z-index: 2;
+}
+
+.correlatie-matrix thead th:first-child { z-index: 3; }
+
+.regelkaart + .regelkaart { border-top: 1px solid var(--bs-border-color); }
+
+.regelkaart-velden {
+  display: grid;
+  gap: .35rem 1rem;
+  grid-template-columns: minmax(6rem, auto) minmax(0, 1fr);
+}
+
+.regelkaart-velden dt {
+  color: var(--bs-secondary-color);
+  font-size: .8125rem;
+  font-weight: 400;
+}
+
+.regelkaart-velden dd {
+  font-size: .875rem;
+  margin-bottom: 0;
+  text-align: right;
+  overflow-wrap: anywhere;
+}
 
 /* ticker input: force uppercase display */
 #ticker { text-transform: uppercase; }

@@ -12,3 +12,31 @@
 </a>
 {%- endif -%}
 {% endmacro %}
+
+{# Gedeelde compacte weergave voor tabelregels op smalle schermen.
+   `velden` bevat tuples (label, waarde, optionele CSS-klasse). De call-block
+   bevat de bestaande acties van de betreffende regel. #}
+{% macro regelkaart(kop, hoofdwaarde, subkop=none, velden=none, hoofdklasse='') %}
+<article class="regelkaart px-3 py-3">
+  <div class="d-flex justify-content-between align-items-start gap-3">
+    <div class="min-w-0">
+      <div class="fw-semibold text-break">{{ kop }}</div>
+      {% if subkop %}<div class="text-muted small text-break">{{ subkop }}</div>{% endif %}
+    </div>
+    <div class="fw-bold text-end text-nowrap {{ hoofdklasse }}">{{ hoofdwaarde }}</div>
+  </div>
+  {% if velden %}
+  <dl class="regelkaart-velden mb-0 mt-3">
+    {% for veld in velden %}
+      <dt>{{ veld[0] }}</dt>
+      <dd class="{{ veld[2] if veld | length > 2 else '' }}">{{ veld[1] }}</dd>
+    {% endfor %}
+  </dl>
+  {% endif %}
+  {% if caller is defined %}
+  <div class="d-flex justify-content-end align-items-center gap-1 mt-2">
+    {{ caller() }}
+  </div>
+  {% endif %}
+</article>
+{% endmacro %}

@@ -1,8 +1,9 @@
 {% extends "base.html" %}
 {% block title %}Grootboek – Beleggingsdashboard{% endblock %}
+{% from "macros.html" import regelkaart with context %}
 {% block content %}
 
-{% macro bedrag(v, valuta) %}{% if v is none %}—{% elif not valuta or valuta == 'EUR' %}€&nbsp;{{ "%.2f"|format(v) }}{% else %}{{ "%.2f"|format(v) }}&nbsp;{{ valuta }}{% endif %}{% endmacro %}
+{% macro bedrag(v, valuta) %}{{ v | bedrag_nl(valuta) }}{% endmacro %}
 
 <div class="d-flex align-items-center justify-content-between mb-3 flex-wrap gap-2">
   <h1 class="h5 mb-0 fw-semibold">
@@ -49,7 +50,33 @@
 
 <div class="card border-0 shadow-sm">
   {% if transacties %}
-  <div class="table-responsive">
+  <div class="d-md-none">
+    {% for tx in transacties %}
+      {% set datum = tx.datum.strftime('%d-%m-%Y') if tx.datum else '—' %}
+      {% set hoofdwaarde = bedrag(tx.bedrag, tx.valuta) if tx.bedrag is not none else bedrag(tx.aantal * tx.prijs, tx.valuta) if tx.aantal is not none and tx.prijs is not none else '—' %}
+      {% set type_badge %}<span class="badge bg-secondary bg-opacity-25 text-dark border">{{ tx.type }}</span>{% endset %}
+      {% set velden = [
+        ('Ticker', tx.ticker or '—'),
+        ('Aantal', tx.aantal | compact_float if tx.aantal is not none else '—'),
+        ('Prijs', bedrag(tx.prijs, tx.valuta) if tx.prijs is not none else '—'),
+        ('Kosten', bedrag(tx.kosten, tx.valuta) if tx.kosten else '—'),
+        ('Notitie', tx.notitie or '—')
+      ] %}
+      {% call regelkaart(datum, hoofdwaarde, type_badge, velden) %}
+        <a href="{{ url_for('transactie_bewerken', gebruiker_id=gebruiker.id, transactie_id=tx.id) }}"
+           class="btn btn-link btn-sm text-secondary p-0 icon-action" title="Bewerken"
+           aria-label="Transactie van {{ datum if tx.datum else 'onbekende datum' }} bewerken"><i class="bi bi-pencil"></i></a>
+        <form method="post"
+              action="{{ url_for('transactie_verwijderen', gebruiker_id=gebruiker.id, transactie_id=tx.id) }}"
+              onsubmit="return confirm('Deze transactie verwijderen?')">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <button class="btn btn-link btn-sm text-danger p-0 icon-action" title="Verwijderen"
+                  aria-label="Transactie van {{ datum if tx.datum else 'onbekende datum' }} verwijderen"><i class="bi bi-trash3"></i></button>
+        </form>
+      {% endcall %}
+    {% endfor %}
+  </div>
+  <div class="table-responsive d-none d-md-block">
     <table class="table table-hover align-middle mb-0">
       <thead class="table-light">
         <tr>
