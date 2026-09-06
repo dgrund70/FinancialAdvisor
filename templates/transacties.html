@@ -17,13 +17,14 @@
     {# Rabo Zakelijk Import: alleen hier: andere rekeningen leveren een ander
        exportformaat. De knop opent de bestandskiezer en post meteen door naar
        het voorbeeldscherm; boeken gebeurt pas daar, na bevestiging. #}
-    <form method="post" enctype="multipart/form-data" class="d-inline"
+    <form method="post" enctype="multipart/form-data" class="d-inline" data-rabo-import
           action="{{ url_for('rabo_import_voorbeeld', gebruiker_id=gebruiker.id, account_id=account.id) }}">
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
       <input type="file" name="bestand" accept=".csv,text/csv" id="rabo-import-bestand"
-             class="d-none" onchange="this.form.submit()">
+             class="d-none">
       <button type="button" class="btn btn-outline-primary btn-sm"
               onclick="document.getElementById('rabo-import-bestand').click()"
+              data-rabo-import-knop
               title="Mutatieoverzicht (CSV) van Rabobank Beheerd Beleggen inlezen">
         <i class="bi bi-bank me-1"></i>Rabo Zakelijk Import
       </button>
@@ -47,6 +48,27 @@
     {% endif %}
   </div>
 </div>
+
+{% set account_tickers = account.transacties
+   | map(attribute='ticker') | select | unique | sort | list %}
+{% if account_tickers %}
+<form method="get"
+      action="{{ url_for('transacties_overzicht', gebruiker_id=gebruiker.id, account_id=account.id) }}"
+      class="d-flex align-items-end gap-2 mb-3">
+  <div>
+    <label class="form-label small text-muted mb-1" for="ticker-filter">Filter op ticker</label>
+    <select class="form-select form-select-sm" id="ticker-filter" name="ticker">
+      <option value="">Alle transacties</option>
+      {% for ticker in account_tickers %}
+        <option value="{{ ticker }}" {{ 'selected' if ticker == ticker_filter }}>{{ ticker }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  <button class="btn btn-outline-secondary btn-sm" type="submit">
+    <i class="bi bi-funnel me-1"></i>Filter
+  </button>
+</form>
+{% endif %}
 
 <div class="card border-0 shadow-sm">
   {% if transacties %}
@@ -124,9 +146,26 @@
   {% else %}
   <div class="card-body text-center py-5 text-muted">
     <i class="bi bi-journal-x fs-1 d-block mb-3"></i>
-    <p class="mb-0">Nog geen transacties{{ ' voor ' ~ ticker_filter if ticker_filter }}.</p>
+    <p class="mb-3">Nog geen transacties{{ ' voor ' ~ ticker_filter if ticker_filter }}.</p>
+    <a class="btn btn-primary"
+       href="{{ url_for('transactie_toevoegen', gebruiker_id=gebruiker.id, account_id=account.id) }}">
+      <i class="bi bi-plus-lg me-1"></i>Transactie boeken
+    </a>
   </div>
   {% endif %}
 </div>
+
+{% if is_rabo_import_account(account) %}
+<script>
+  document.querySelector('[data-rabo-import] input[type="file"]').addEventListener('change', function () {
+    if (!this.files.length) return;
+    const knop = this.form.querySelector('[data-rabo-import-knop]');
+    knop.disabled = true;
+    knop.setAttribute('aria-busy', 'true');
+    knop.innerHTML = '<span class="spinner-border spinner-border-sm me-1" aria-hidden="true"></span>Bestand inlezen…';
+    this.form.submit();
+  });
+</script>
+{% endif %}
 
 {% endblock %}

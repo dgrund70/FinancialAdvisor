@@ -198,7 +198,18 @@
   <div class="card border-0 shadow-sm mb-4">
     <div class="card-body text-center py-5 text-muted">
       <i class="bi bi-inbox fs-1 d-block mb-3"></i>
-      <p class="mb-3">Nog geen posities. Voeg een broker account toe om te beginnen.</p>
+      {% if account_data %}
+        <p class="mb-3">Nog geen posities. Boek je eerste transactie.</p>
+        <a class="btn btn-primary"
+           href="{{ url_for('transactie_toevoegen', gebruiker_id=gebruiker.id, account_id=account_data[0].account.id) }}">
+          <i class="bi bi-journal-plus me-1"></i>Transactie boeken
+        </a>
+      {% else %}
+        <p class="mb-3">Nog geen brokeraccount. Voeg er één toe om te beginnen.</p>
+        <a class="btn btn-primary" href="#account-toevoegen">
+          <i class="bi bi-bank me-1"></i>Brokeraccount toevoegen
+        </a>
+      {% endif %}
     </div>
   </div>
 {% endif %}
@@ -423,7 +434,7 @@
 {% endfor %}
 
 {# ── Broker account toevoegen ──────────────────────────────────── #}
-<div class="card border-0 shadow-sm">
+<div class="card border-0 shadow-sm" id="account-toevoegen">
   <div class="card-header bg-white border-bottom py-3">
     <h6 class="mb-0 fw-semibold"><i class="bi bi-bank me-2 text-secondary"></i>Broker account toevoegen</h6>
   </div>
@@ -444,15 +455,23 @@
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"
         integrity="sha384-NrKB+u6Ts6AtkIhwPixiKTzgSKNblyhlk0Sohlgar9UHUBzai/sgnNNWWd291xqt"
         crossorigin="anonymous"></script>
-<style>
-  .mutatie-legenda {
-    display: inline-block; width: 0; height: .85em; vertical-align: -.1em;
-    border-left: 2px dashed rgba(13,110,253,.6); margin-right: .45rem;
-  }
-</style>
 <script>
   const wsAll = {{ waarde_serie | tojson }};
   const fmtDatum = iso => { const [, m, d] = iso.split("-"); return `${d}-${m}`; };
+  const chartKleuren = () => {
+    const stijl = getComputedStyle(document.documentElement);
+    return {
+      tekst: stijl.getPropertyValue('--bs-body-color').trim(),
+      raster: stijl.getPropertyValue('--bs-border-color').trim(),
+      vlak: stijl.getPropertyValue('--bs-body-bg').trim(),
+      positief: stijl.getPropertyValue('--app-positive').trim(),
+      positiefVlak: stijl.getPropertyValue('--app-positive-soft').trim(),
+      secundair: stijl.getPropertyValue('--bs-secondary-color').trim(),
+      marker: stijl.getPropertyValue('--app-marker').trim(),
+      markerZacht: stijl.getPropertyValue('--app-marker-soft').trim(),
+    };
+  };
+  const beginKleuren = chartKleuren();
 
   // Huidige (op periode gefilterde) reeks — de marker-plugin en de tooltip
   // lezen hieruit, zodat markers meeschuiven met de 1W/1M/3M/Alles-knoppen.
@@ -466,6 +485,7 @@
     afterDatasetsDraw(chart) {
       const { ctx, chartArea, scales } = chart;
       if (!chartArea || !scales.x) return;
+      const kleuren = chartKleuren();
       ctx.save();
       wsHuidig.forEach((punt, i) => {
         if (!punt.mutatie) return;
@@ -474,12 +494,12 @@
         ctx.beginPath();
         ctx.setLineDash([4, 4]);
         ctx.lineWidth = 1.5;
-        ctx.strokeStyle = "rgba(13,110,253,.45)";
+        ctx.strokeStyle = kleuren.markerZacht;
         ctx.moveTo(x, chartArea.top);
         ctx.lineTo(x, chartArea.bottom);
         ctx.stroke();
         ctx.setLineDash([]);
-        ctx.fillStyle = "rgba(13,110,253,.85)";
+        ctx.fillStyle = kleuren.marker;
         ctx.beginPath();                       // driehoekje bovenaan, wijst omlaag
         ctx.moveTo(x - 4.5, chartArea.top);
         ctx.lineTo(x + 4.5, chartArea.top);
@@ -500,15 +520,15 @@
         {
           label: "Portefeuillewaarde (€)",
           data: wsAll.map(d => d.waarde),
-          borderColor: "#198754",
-          backgroundColor: "rgba(25,135,84,.10)",
+          borderColor: beginKleuren.positief,
+          backgroundColor: beginKleuren.positiefVlak,
           fill: true, tension: .3, pointHoverRadius: 5,
           // Laatste punt komt van de live koers i.p.v. uit de koershistorie:
           // open bolletje + gestreept eindstuk, zodat je ziet dat het een
           // andere bron is dan de rest van de lijn.
           pointRadius: ctx => (wsHuidig[ctx.dataIndex] || {}).live ? 4 : 0,
-          pointBackgroundColor: "#fff",
-          pointBorderColor: "#198754",
+          pointBackgroundColor: beginKleuren.vlak,
+          pointBorderColor: beginKleuren.positief,
           pointBorderWidth: 2,
           segment: {
             borderDash: ctx => (wsHuidig[ctx.p1DataIndex] || {}).live ? [5, 3] : undefined,
@@ -517,7 +537,7 @@
         {
           label: "Netto inleg, cumulatief (€)",
           data: wsAll.map(d => d.inleg),
-          borderColor: "#adb5bd",
+          borderColor: beginKleuren.secundair,
           borderDash: [6, 4], fill: false, tension: 0, pointRadius: 0,
         },
       ],
@@ -526,23 +546,67 @@
       responsive: true,
       interaction: { mode: "index", intersect: false },
       plugins: {
-        legend: { position: "bottom" },
-        tooltip: { callbacks: {
-          label: c => `${c.dataset.label}: €${(c.parsed.y ?? 0).toLocaleString("nl-NL")}`,
-          footer: items => {
-            if (!items.length) return "";
-            const punt = wsHuidig[items[0].dataIndex] || {};
-            const regels = [];
-            if (punt.mutatie) regels.push("Grootboek: " + punt.mutatie);
-            if (punt.live) regels.push("Actuele koers — nog niet in de koershistorie");
-            return regels;
+        legend: { position: "bottom", labels: { color: beginKleuren.tekst } },
+        tooltip: {
+          backgroundColor: beginKleuren.vlak,
+          titleColor: beginKleuren.tekst,
+          bodyColor: beginKleuren.tekst,
+          footerColor: beginKleuren.tekst,
+          borderColor: beginKleuren.raster,
+          borderWidth: 1,
+          callbacks: {
+            label: c => `${c.dataset.label}: €${(c.parsed.y ?? 0).toLocaleString("nl-NL")}`,
+            footer: items => {
+              if (!items.length) return "";
+              const punt = wsHuidig[items[0].dataIndex] || {};
+              const regels = [];
+              if (punt.mutatie) regels.push("Grootboek: " + punt.mutatie);
+              if (punt.live) regels.push("Actuele koers — nog niet in de koershistorie");
+              return regels;
+            },
           },
-        } },
+        },
       },
       layout: { padding: { top: 8 } },   // ruimte voor de marker-driehoekjes
-      scales: { y: { ticks: { callback: v => "€" + v.toLocaleString("nl-NL") } } },
+      scales: {
+        x: {
+          ticks: { color: beginKleuren.tekst },
+          grid: { color: beginKleuren.raster },
+        },
+        y: {
+          ticks: {
+            color: beginKleuren.tekst,
+            callback: v => "€" + v.toLocaleString("nl-NL"),
+          },
+          grid: { color: beginKleuren.raster },
+        },
+      },
     },
   });
+
+  function werkGrafiekthemaBij() {
+    const kleuren = chartKleuren();
+    waardeChart.data.datasets[0].borderColor = kleuren.positief;
+    waardeChart.data.datasets[0].backgroundColor = kleuren.positiefVlak;
+    waardeChart.data.datasets[0].pointBackgroundColor = kleuren.vlak;
+    waardeChart.data.datasets[0].pointBorderColor = kleuren.positief;
+    waardeChart.data.datasets[1].borderColor = kleuren.secundair;
+    waardeChart.options.plugins.legend.labels.color = kleuren.tekst;
+    Object.assign(waardeChart.options.plugins.tooltip, {
+      backgroundColor: kleuren.vlak,
+      titleColor: kleuren.tekst,
+      bodyColor: kleuren.tekst,
+      footerColor: kleuren.tekst,
+      borderColor: kleuren.raster,
+    });
+    waardeChart.options.scales.x.ticks.color = kleuren.tekst;
+    waardeChart.options.scales.x.grid.color = kleuren.raster;
+    waardeChart.options.scales.y.ticks.color = kleuren.tekst;
+    waardeChart.options.scales.y.grid.color = kleuren.raster;
+    waardeChart.update();
+  }
+
+  window.addEventListener('themawissel', werkGrafiekthemaBij);
 
   function toonPeriode(dagen) {
     const subset = (() => {

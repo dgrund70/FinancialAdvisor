@@ -38,7 +38,10 @@
 {% if totaal is none %}
 <div class="card border-0 shadow-sm"><div class="card-body text-center py-5 text-muted">
   <i class="bi bi-pie-chart fs-1 d-block mb-3"></i>
-  <p class="mb-0">Nog geen holdings met koers. Voeg posities toe en werk de gegevens bij via de bovenbalk.</p>
+  <p class="mb-3">Nog geen posities met koers. Voeg eerst een belegging toe aan je portfolio.</p>
+  <a class="btn btn-primary" href="{{ url_for('dashboard', gebruiker_id=gebruiker.id) }}">
+    <i class="bi bi-briefcase me-1"></i>Naar portfolio
+  </a>
 </div></div>
 {% else %}
 
