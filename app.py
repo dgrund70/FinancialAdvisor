@@ -8,7 +8,7 @@ import subprocess
 import sys
 import threading
 from collections import Counter
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, time as dt_time, timedelta
 from itertools import count
 from pathlib import Path
 
@@ -162,6 +162,10 @@ def bedrag_nl(value, valuta="EUR"):
     """Formatteer een bedrag met Nederlandse cijfer- en valutanotatie."""
     if value is None:
         return "—"
+    # -0.0 komt uit floatafronding (een saldo dat precies nul is). "-0,00" leest
+    # als een tekort dat er niet is.
+    if abs(value) < 0.005:
+        value = 0.0
     getal = f"{value:,.2f}".translate(str.maketrans({",": ".", ".": ","}))
     if not valuta or valuta.upper() == "EUR":
         return f"€\u00a0{getal}"
@@ -175,6 +179,15 @@ def pct_nl(value, decimalen=1):
         return "—"
     teken = "+" if value > 0 else ""
     return f"{teken}{value:.{decimalen}f}".replace(".", ",") + "%"
+
+
+@app.template_filter("pp_nl")
+def pp_nl(value, decimalen=1):
+    """Formatteer een verschil in procentpunten, Nederlandse notatie."""
+    if value is None:
+        return "—"
+    teken = "+" if value > 0 else ""
+    return f"{teken}{value:.{decimalen}f}".replace(".", ",") + "\u00a0pp"
 
 
 @app.template_filter("markdown")
@@ -196,6 +209,12 @@ def parse_json(text):
 
 # ── Helpers ──────────────────────────────────────────────────────
 
+# laad_prijzen() geeft de tijd al geformatteerd terug; de ruwe ISO-string is
+# nodig voor de relatieve tijd op het dashboard. Hier bewaard zodat de
+# signatuur van laad_prijzen() (vijf aanroepplekken) ongemoeid blijft.
+_RUWE_BIJGEWERKT = {"waarde": None}
+
+
 def laad_prijzen():
     if not PRIJZEN.exists():
         return {}, None, {}
@@ -204,12 +223,73 @@ def laad_prijzen():
     except (json.JSONDecodeError, OSError):
         return {}, None, {}
     bijgewerkt = data.get("bijgewerkt")
+    _RUWE_BIJGEWERKT["waarde"] = bijgewerkt
     if bijgewerkt:
         try:
             bijgewerkt = datetime.fromisoformat(bijgewerkt).strftime("%d-%m-%Y %H:%M")
         except ValueError:
             pass
     return data.get("koersen", {}), bijgewerkt, data.get("wisselkoersen", {})
+
+
+# Euronext Amsterdam: ma-vr 09:00-17:30 (lokale tijd). Fondsen met een NAV
+# kennen geen beurstijd; voor de statusregel volgen we de beurs, want daar komen
+# de meeste koersen vandaan.
+BEURS_OPEN  = dt_time(9, 0)
+BEURS_DICHT = dt_time(17, 30)
+_WEEKDAGEN = ["maandag", "dinsdag", "woensdag", "donderdag",
+              "vrijdag", "zaterdag", "zondag"]
+
+
+def _relatieve_tijd(moment, nu):
+    """'45 min geleden', '2 uur geleden', 'gisteren', '3 dagen geleden'."""
+    seconden = (nu - moment).total_seconds()
+    if seconden < 0:
+        return "zojuist"
+    minuten = int(seconden // 60)
+    if minuten < 1:
+        return "zojuist"
+    if minuten < 60:
+        return f"{minuten} min geleden"
+    uren = minuten // 60
+    if uren < 24:
+        return f"{uren} uur geleden"
+    dagen = (nu.date() - moment.date()).days
+    if dagen <= 1:
+        return "gisteren"
+    return f"{dagen} dagen geleden"
+
+
+def _markt_status(nu):
+    """(open?, omschrijving) voor de koersregel op het dashboard."""
+    is_werkdag = nu.weekday() < 5
+    if is_werkdag and BEURS_OPEN <= nu.time() < BEURS_DICHT:
+        return True, "markt open"
+    # Laatste handelsdag: vandaag als de beurs al dicht is, anders terug in de tijd.
+    dag = nu.date()
+    if not (is_werkdag and nu.time() >= BEURS_DICHT):
+        dag -= timedelta(days=1)
+        while dag.weekday() >= 5:
+            dag -= timedelta(days=1)
+    return False, f"markt gesloten (slotkoers {_WEEKDAGEN[dag.weekday()]})"
+
+
+def koersen_status(ruwe_tijd, nu=None):
+    """Bouw de statusregel: absolute tijd, hoe lang geleden, en marktstatus."""
+    nu = nu or datetime.now()
+    open_, markt = _markt_status(nu)
+    status = {"markt_open": open_, "markt": markt, "absoluut": None, "relatief": None}
+    if not ruwe_tijd:
+        return status
+    try:
+        moment = datetime.fromisoformat(ruwe_tijd)
+    except (TypeError, ValueError):
+        return status
+    if moment.tzinfo is not None:
+        moment = moment.replace(tzinfo=None)
+    status["absoluut"] = moment.strftime("%d-%m-%Y %H:%M")
+    status["relatief"] = _relatieve_tijd(moment, nu)
+    return status
 
 
 def bereken_posities(posities, koersen, wisselkoersen=None):
@@ -336,17 +416,35 @@ def gebruiker_hernoemen(gebruiker_id):
     nieuwe_naam = request.form.get("naam", "").strip()
     if not nieuwe_naam:
         flash("Naam mag niet leeg zijn.", "danger")
-        return redirect(url_for("dashboard", gebruiker_id=gebruiker_id))
+        return redirect(url_for("beheer", gebruiker_id=gebruiker_id))
     bezet = Gebruiker.query.filter(
         Gebruiker.naam == nieuwe_naam, Gebruiker.id != gebruiker_id
     ).first()
     if bezet:
         flash(f"Naam '{nieuwe_naam}' is al in gebruik.", "warning")
-        return redirect(url_for("dashboard", gebruiker_id=gebruiker_id))
+        return redirect(url_for("beheer", gebruiker_id=gebruiker_id))
     gebruiker.naam = nieuwe_naam
     db.session.commit()
     flash(f"Naam gewijzigd naar '{nieuwe_naam}'.", "success")
-    return redirect(url_for("dashboard", gebruiker_id=gebruiker_id))
+    return redirect(url_for("beheer", gebruiker_id=gebruiker_id))
+
+
+@app.route("/gebruiker/<int:gebruiker_id>/beheer")
+def beheer(gebruiker_id):
+    """Profielbeheer: naam wijzigen en het profiel verwijderen.
+
+    Bewust een eigen pagina en niet het switch-menu: verwijderen hoort niet
+    één muisklik naast 'wissel van gebruiker' te liggen.
+    """
+    gebruiker = Gebruiker.query.get_or_404(gebruiker_id)
+    aantal_accounts = BrokerAccount.query.filter_by(gebruiker_id=gebruiker.id).count()
+    aantal_posities = (Positie.query
+                       .join(BrokerAccount)
+                       .filter(BrokerAccount.gebruiker_id == gebruiker.id)
+                       .count())
+    return render_template("beheer.html", gebruiker=gebruiker,
+                           aantal_accounts=aantal_accounts,
+                           aantal_posities=aantal_posities)
 
 
 # ── Dashboard ─────────────────────────────────────────────────────
@@ -458,6 +556,10 @@ def dashboard(gebruiker_id):
             "cash_eur":     cash_eur,
             "xirr":         acc_xirr,
             "fx_issues":    had_fx,
+            # Dagrendement in procent, zodat de kleurdrempel (±0,5%) ook op de
+            # totaalregel van een account kan werken.
+            "dag_pct":      (td / (tw - td) * 100
+                             if hp and tw is not None and abs(tw - td) > 0.01 else None),
         })
         grand_gerealiseerd += tg
         grand_cash_eur     += cash_eur
@@ -470,6 +572,12 @@ def dashboard(gebruiker_id):
             grand_dag    += td
 
     grand_eind = (grand_waarde if grand_has_prices else 0.0) + grand_cash_eur
+    # Netto inleg = stortingen minus opnames. In grand_flows staat een storting
+    # negatief (geld de portefeuille in), dus omdraaien.
+    grand_inleg = -sum(bedrag for _, bedrag in grand_flows) if grand_flows else None
+    grand_resultaat = (grand_eind - grand_inleg) if grand_inleg is not None else None
+    grand_resultaat_pct = (grand_resultaat / grand_inleg * 100
+                           if grand_inleg and abs(grand_inleg) > 0.01 else None)
     heeft_open_globaal = any(bool(d["rows"]) for d in account_data)
     grand_xirr = (xirr(grand_flows + [(date.today(), grand_eind)])
                   if grand_flows and (grand_has_prices or not heeft_open_globaal) else None)
@@ -503,10 +611,14 @@ def dashboard(gebruiker_id):
             "xirr":         grand_xirr,
             "eind":         grand_eind,
             "twr":          grand_twr,
+            "inleg":          grand_inleg,
+            "resultaat":      grand_resultaat,
+            "resultaat_pct":  grand_resultaat_pct,
         },
         benchmarks   = benchmarks,
         heeft_flows  = bool(grand_flows),
         bijgewerkt   = bijgewerkt,
+        koersen_status = koersen_status(_RUWE_BIJGEWERKT["waarde"]),
         waarde_serie = waarde_serie,
     )
 

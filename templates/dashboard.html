@@ -7,10 +7,43 @@
 {# ── Macro's ──────────────────────────────────────────────────── #}
 {% macro kleur(v) %}{{ 'pos' if v is not none and v > 0 else 'neg' if v is not none and v < 0 else 'text-muted' }}{% endmacro %}
 {% macro teken(v) %}{{ '+' if v is not none and v > 0 else '' }}{% endmacro %}
+{# Dagbeweging pas kleuren vanaf ±0,5%. Daaronder is het ruis en leidt fel rood
+   op -0,12% alleen maar af. #}
+{% macro dagkleur(pct) %}{{ 'pos' if pct is not none and pct >= 0.5 else 'neg' if pct is not none and pct <= -0.5 else 'text-muted' }}{% endmacro %}
 {% macro eur(v) %}{{ v | bedrag_nl }}{% endmacro %}
 {% macro geld(v, valuta) %}{{ v | bedrag_nl(valuta) }}{% endmacro %}
 {% macro pct(v) %}{{ v | pct_nl(2) }}{% endmacro %}
 {% macro xirr_fmt(r) %}{% if r is none %}{{ none | pct_nl(1) }}{% else %}{{ (r * 100) | pct_nl(1) }}{% endif %}{% endmacro %}
+
+{# Kebab per positie: tags bewerken en verwijderen. Verwijderen staat bewust
+   niet naast het potlood in de rij — één misklik daar is onomkeerbaar. #}
+{% macro positie_menu(gebruiker, pos) %}
+<div class="dropdown">
+  <button class="btn btn-link btn-sm text-secondary p-0 icon-action" type="button"
+          data-bs-toggle="dropdown" data-tabel-dropdown aria-expanded="false"
+          title="Meer opties" aria-label="Meer opties voor {{ pos.ticker }}">
+    <i class="bi bi-three-dots-vertical"></i>
+  </button>
+  <ul class="dropdown-menu dropdown-menu-end shadow-sm">
+    <li>
+      <a class="dropdown-item" href="{{ url_for('positie_tags_bewerken', gebruiker_id=gebruiker.id, pos_id=pos.id) }}">
+        <i class="bi bi-tags me-2" aria-hidden="true"></i>Tags bewerken…
+      </a>
+    </li>
+    <li><hr class="dropdown-divider"></li>
+    <li>
+      <form method="post"
+            action="{{ url_for('positie_verwijderen', gebruiker_id=gebruiker.id, pos_id=pos.id) }}"
+            onsubmit="return confirm('Positie {{ pos.ticker }} verwijderen?\n\nDit kan niet ongedaan gemaakt worden.')">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <button type="submit" class="dropdown-item text-danger">
+          <i class="bi bi-trash3 me-2" aria-hidden="true"></i>Positie {{ pos.ticker }} verwijderen…
+        </button>
+      </form>
+    </li>
+  </ul>
+</div>
+{% endmacro %}
 
 {# ── Samenvatting bovenaan ─────────────────────────────────────── #}
 <div class="card portfolio-hero border-0 shadow-sm mb-4">
@@ -23,8 +56,16 @@
         </div>
         {% if totaal.waarde is not none %}
           <small class="text-muted opacity-75 d-block mt-2">
-            {{ eur(totaal.waarde) }} belegd
-            {%- if totaal.cash_eur %} · {{ eur(totaal.cash_eur) }} cash{% endif %}
+            {%- if totaal.inleg is not none -%}
+              {{ eur(totaal.inleg) }} ingelegd · {{ eur(totaal.cash_eur) }} cash ·
+              <span class="{{ kleur(totaal.resultaat) }}">
+                {{- teken(totaal.resultaat) }}{{ eur(totaal.resultaat) }}
+                {%- if totaal.resultaat_pct is not none %} ({{ pct(totaal.resultaat_pct) }}){% endif -%}
+              </span>
+            {%- else -%}
+              {{ eur(totaal.waarde) }} belegd · {{ eur(totaal.cash_eur) }} cash ·
+              <span class="text-muted">geen stortingen geboekt, dus geen resultaat te berekenen</span>
+            {%- endif -%}
           </small>
         {% elif totaal.cash_eur %}
           <small class="text-muted opacity-75 d-block mt-2">koersen ontbreken · {{ eur(totaal.cash_eur) }} cash</small>
@@ -32,11 +73,11 @@
       </div>
       <div class="col-5 border-start ps-3 ps-md-4">
         <p class="text-muted small mb-1"><i class="bi bi-clock-history me-1"></i>Vandaag{{ uitleg('dag') }}</p>
-        <div class="portfolio-hero-day fw-bold {{ kleur(totaal.dag) }}">
+        <div class="portfolio-hero-day fw-bold {{ dagkleur(totaal.dag_pct) }}">
           {{ teken(totaal.dag) }}{{ eur(totaal.dag) }}
         </div>
         {% if totaal.dag_pct is not none %}
-          <small class="{{ kleur(totaal.dag_pct) }} opacity-75">{{ pct(totaal.dag_pct) }}</small>
+          <small class="{{ dagkleur(totaal.dag_pct) }} opacity-75">{{ pct(totaal.dag_pct) }}</small>
         {% endif %}
       </div>
     </div>
@@ -114,6 +155,8 @@
       <button type="button" class="btn btn-outline-secondary periode-btn" data-dagen="7">1W</button>
       <button type="button" class="btn btn-outline-secondary periode-btn" data-dagen="30">1M</button>
       <button type="button" class="btn btn-outline-secondary periode-btn" data-dagen="90">3M</button>
+      <button type="button" class="btn btn-outline-secondary periode-btn" data-periode="ytd">YTD</button>
+      <button type="button" class="btn btn-outline-secondary periode-btn" data-dagen="365">1J</button>
       <button type="button" class="btn btn-outline-secondary periode-btn active" data-dagen="0">Alles</button>
     </div>
   </div>
@@ -129,13 +172,16 @@
 {# ── Toolbar ───────────────────────────────────────────────────── #}
 <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
   <small class="text-muted">
-    {% if bijgewerkt %}
-      <i class="bi bi-arrow-repeat me-1"></i>Koersen: {{ bijgewerkt }}
+    {% if koersen_status.relatief %}
+      <i class="bi bi-arrow-repeat me-1" aria-hidden="true"></i>Koersen:
+      <span title="Opgehaald op {{ koersen_status.absoluut }}">{{ koersen_status.relatief }}</span>
+      · {{ koersen_status.markt }}
+    {% elif bijgewerkt %}
+      <i class="bi bi-arrow-repeat me-1" aria-hidden="true"></i>Koersen: {{ bijgewerkt }}
     {% else %}
-      <i class="bi bi-exclamation-circle me-1"></i>Nog geen koersen geladen
+      <i class="bi bi-exclamation-circle me-1" aria-hidden="true"></i>Nog geen koersen geladen
     {% endif %}
   </small>
-  <small class="text-muted">Alle databronnen werk je centraal bij via de bovenbalk.</small>
 </div>
 
 {# ── Benchmarkvergelijking (deposit-matched XIRR) ───────────────── #}
@@ -154,7 +200,7 @@
           <th>Strategie</th>
           <th class="text-end">Eindwaarde</th>
           <th class="text-end">Rendement (XIRR)</th>
-          <th class="text-end">Δ vs jou</th>
+          <th class="text-end">Δ jij vs index</th>
         </tr>
       </thead>
       <tbody>
@@ -172,7 +218,7 @@
           <td class="text-end">
             {% if totaal.xirr is not none and b.xirr is not none %}
               {% set d = totaal.xirr - b.xirr %}
-              <span class="{{ kleur(d) }}">{{ '+' if d > 0 else '' }}{{ "%.1f"|format(d * 100) }} pp</span>
+              <span class="{{ kleur(d) }}">{{ (d * 100) | pp_nl(1) }}</span>
             {% else %}<span class="text-muted">—</span>{% endif %}
           </td>
         </tr>
@@ -206,8 +252,10 @@
         </a>
       {% else %}
         <p class="mb-3">Nog geen brokeraccount. Voeg er één toe om te beginnen.</p>
-        <a class="btn btn-primary" href="#account-toevoegen">
-          <i class="bi bi-bank me-1"></i>Brokeraccount toevoegen
+        <a class="btn btn-primary" href="#account-toevoegen"
+           data-bs-toggle="collapse" data-bs-target="#account-toevoegen-formulier"
+           role="button" aria-controls="account-toevoegen-formulier" aria-expanded="false">
+          <i class="bi bi-bank me-1" aria-hidden="true"></i>Brokeraccount toevoegen
         </a>
       {% endif %}
     </div>
@@ -215,6 +263,7 @@
 {% endif %}
 
 {% for d in account_data %}
+{% if d.rows %}
 <div class="card border-0 shadow-sm mb-4">
   <div class="card-header bg-white border-bottom d-flex justify-content-between align-items-center py-3 flex-wrap gap-2">
     <h6 class="mb-0 fw-semibold">
@@ -246,7 +295,7 @@
           <li>
             <form method="post"
                   action="{{ url_for('account_verwijderen', gebruiker_id=gebruiker.id, account_id=d.account.id) }}"
-                  onsubmit="return confirm('Account \'{{ d.account.naam }}\' en alle posities verwijderen?\n\nDit kan niet ongedaan worden gemaakt.')">
+                  onsubmit="return confirm('Account {{ d.account.naam }} verwijderen?\n\nAlle posities en transacties van dit account gaan mee. Dit kan niet ongedaan gemaakt worden.')">
               <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
               <button class="dropdown-item text-danger">
                 <i class="bi bi-trash3 me-2"></i>Account verwijderen…
@@ -258,7 +307,14 @@
     </div>
   </div>
 
-  {% if d.rows %}
+  {# Kolommen die voor élke rij leeg zijn, tonen we niet. Generiek: per kolom
+     kijken of één rij een waarde heeft. Scheelt drie lege kolommen bij een
+     eenvoudige portefeuille. #}
+  {% set toon_naam    = d.rows | map(attribute='pos.naam') | select | list | length > 0 %}
+  {% set toon_tags    = d.rows | map(attribute='pos.tags') | select | list | length > 0 %}
+  {% set toon_aankoop = d.rows | map(attribute='pos.aankoopprijs') | select | list | length > 0 %}
+  {% set toon_koers   = d.rows | selectattr('koers', 'ne', none) | list | length > 0 %}
+  {% set toon_gereal  = d.rows | map(attribute='gerealiseerd') | select | list | length > 0 %}
   <div class="d-md-none">
     {% for r in d.rows %}
       {% set koers %}{% if r.koers is not none %}{{ geld(r.koers, r.valuta) }}{% else %}—{% endif %}{% endset %}
@@ -266,42 +322,26 @@
       {% set rendement %}{% if r.winst is not none %}{{ teken(r.winst) }}{{ eur(r.winst) }} · {{ pct(r.winst_pct) }}{% else %}—{% endif %}{% endset %}
       {% set gerealiseerd %}{% if r.gerealiseerd %}{{ teken(r.gerealiseerd) }}{{ geld(r.gerealiseerd, r.pos.valuta) }}{% else %}—{% endif %}{% endset %}
       {% set tags %}{{ r.pos.tags | map(attribute='naam') | join(', ') or '—' }}{% endset %}
-      {% set velden = [
-        ('Aantal', r.pos.aantal | compact_float),
-        ('Aankoop', eur(r.pos.aankoopprijs)),
-        ('Koers', koers),
-        ('Vandaag', dag, kleur(r.dag_winst)),
-        ('Rendement', rendement, kleur(r.winst)),
-        ('Gerealiseerd', gerealiseerd, kleur(r.gerealiseerd)),
-        ('Tags', tags)
-      ] %}
+      {# Zelfde regel als in de tabel: velden die nergens gevuld zijn, tonen we niet. #}
+      {% set velden = [('Aantal', r.pos.aantal | compact_float)]
+        + ([('Aankoop', eur(r.pos.aankoopprijs))] if toon_aankoop else [])
+        + ([('Koers', koers)] if toon_koers else [])
+        + ([('Vandaag', dag, dagkleur(r.dag_pct))] if toon_koers else [])
+        + [('Rendement', rendement, kleur(r.winst))]
+        + ([('Gerealiseerd', gerealiseerd, kleur(r.gerealiseerd))] if toon_gereal else [])
+        + ([('Tags', tags)] if toon_tags else []) %}
       {% call regelkaart(r.pos.ticker, eur(r.waarde), r.pos.naam, velden) %}
-        <a href="{{ url_for('positie_tags_bewerken', gebruiker_id=gebruiker.id, pos_id=r.pos.id) }}"
-           class="btn btn-link btn-sm text-muted p-0 icon-action" title="Tags bewerken"
-           aria-label="Tags van {{ r.pos.ticker }} bewerken">
-          <i class="bi bi-tags"></i>
-        </a>
         <a href="{{ url_for('positie_bewerken', gebruiker_id=gebruiker.id, pos_id=r.pos.id) }}"
            class="btn btn-link btn-sm text-secondary p-0 icon-action" title="Positie bewerken"
            aria-label="{{ r.pos.ticker }} bewerken">
           <i class="bi bi-pencil"></i>
         </a>
-        <form method="post"
-              action="{{ url_for('positie_verwijderen', gebruiker_id=gebruiker.id, pos_id=r.pos.id) }}"
-              onsubmit="return confirm('{{ r.pos.ticker }} verwijderen?')">
-          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-          <button class="btn btn-link btn-sm text-danger p-0 icon-action" title="Verwijder"
-                  aria-label="{{ r.pos.ticker }} verwijderen">
-            <i class="bi bi-trash3"></i>
-          </button>
-        </form>
+        {{ positie_menu(gebruiker, r.pos) }}
       {% endcall %}
     {% endfor %}
-    {% set totaal_velden = [
-      ('Vandaag', teken(d.dag) ~ eur(d.dag) if d.dag is not none else '—', kleur(d.dag)),
-      ('Rendement', teken(d.winst) ~ eur(d.winst) if d.winst is not none else '—', kleur(d.winst)),
-      ('Gerealiseerd', teken(d.gerealiseerd) ~ eur(d.gerealiseerd) if d.gerealiseerd else '—', kleur(d.gerealiseerd))
-    ] %}
+    {% set totaal_velden = ([('Vandaag', teken(d.dag) ~ eur(d.dag) if d.dag is not none else '—', dagkleur(d.dag_pct))] if toon_koers else [])
+      + [('Rendement', teken(d.winst) ~ eur(d.winst) if d.winst is not none else '—', kleur(d.winst))]
+      + ([('Gerealiseerd', teken(d.gerealiseerd) ~ eur(d.gerealiseerd) if d.gerealiseerd else '—', kleur(d.gerealiseerd))] if toon_gereal else []) %}
     {{ regelkaart('Totaal', eur(d.waarde), none, totaal_velden) }}
   </div>
   <div class="table-responsive d-none d-md-block">
@@ -309,15 +349,15 @@
       <thead class="table-light">
         <tr>
           <th>Ticker</th>
-          <th class="d-none d-md-table-cell">Naam</th>
-          <th class="d-none d-lg-table-cell">Tags</th>
+          {% if toon_naam %}<th>Naam</th>{% endif %}
+          {% if toon_tags %}<th class="d-none d-lg-table-cell">Tags</th>{% endif %}
           <th class="text-end">Aantal</th>
-          <th class="text-end d-none d-sm-table-cell">Aankoop</th>
-          <th class="text-end">Koers</th>
+          {% if toon_aankoop %}<th class="text-end">Aankoop</th>{% endif %}
+          {% if toon_koers %}<th class="text-end">Koers</th>{% endif %}
           <th class="text-end">Waarde</th>
-          <th class="text-end d-none d-sm-table-cell">Dag</th>
+          {% if toon_koers %}<th class="text-end">Dag</th>{% endif %}
           <th class="text-end">Rendement</th>
-          <th class="text-end">Gerealiseerd</th>
+          {% if toon_gereal %}<th class="text-end">Gerealiseerd</th>{% endif %}
           <th></th>
         </tr>
       </thead>
@@ -331,19 +371,19 @@
                  title="Handmatige koers — niet live bijgewerkt"></i>
             {% endif %}
           </td>
-          <td class="text-muted small d-none d-md-table-cell">{{ r.pos.naam or '—' }}</td>
+          {% if toon_naam %}<td class="text-muted small">{{ r.pos.naam or '—' }}</td>{% endif %}
+          {% if toon_tags %}
           <td class="d-none d-lg-table-cell">
             {% for tag in r.pos.tags %}
               <span class="badge bg-primary bg-opacity-10 text-primary border border-primary-subtle me-1">{{ tag.naam }}</span>
+            {% else %}
+              <span class="text-muted">—</span>
             {% endfor %}
-            <a href="{{ url_for('positie_tags_bewerken', gebruiker_id=gebruiker.id, pos_id=r.pos.id) }}"
-               class="btn btn-link btn-sm p-0 text-muted icon-action" title="Tags bewerken"
-               aria-label="Tags van {{ r.pos.ticker }} bewerken">
-              <i class="bi bi-pencil-square"></i>
-            </a>
           </td>
+          {% endif %}
           <td class="text-end">{{ r.pos.aantal | compact_float }}</td>
-          <td class="text-end d-none d-sm-table-cell text-muted small">{{ eur(r.pos.aankoopprijs) }}</td>
+          {% if toon_aankoop %}<td class="text-end text-muted small">{{ eur(r.pos.aankoopprijs) }}</td>{% endif %}
+          {% if toon_koers %}
           <td class="text-end">
             {% if r.koers is not none %}
               {{ geld(r.koers, r.valuta) }}
@@ -351,77 +391,78 @@
               <span class="text-muted">—</span>
             {% endif %}
           </td>
+          {% endif %}
           <td class="text-end fw-semibold">
             {% if r.waarde is not none %}{{ eur(r.waarde) }}{% else %}<span class="text-muted">—</span>{% endif %}
           </td>
-          <td class="text-end d-none d-sm-table-cell small {{ kleur(r.dag_winst) }}">
+          {% if toon_koers %}
+          <td class="text-end small text-nowrap {{ dagkleur(r.dag_pct) }}">
             {% if r.koers is not none %}
               {{ teken(r.dag_winst) }}{{ eur(r.dag_winst) }}<br>
               <span class="opacity-75">{{ pct(r.dag_pct) }}</span>
             {% else %}—{% endif %}
           </td>
-          <td class="text-end small {{ kleur(r.winst) if r.winst is not none else '' }}">
+          {% endif %}
+          <td class="text-end small text-nowrap {{ kleur(r.winst) if r.winst is not none else '' }}">
             {% if r.winst is not none %}
               {{ teken(r.winst) }}{{ eur(r.winst) }}<br>
               <span class="opacity-75">{{ pct(r.winst_pct) }}</span>
             {% else %}<span class="text-muted">—</span>{% endif %}
           </td>
-          <td class="text-end small {{ kleur(r.gerealiseerd) if r.gerealiseerd else '' }}">
+          {% if toon_gereal %}
+          <td class="text-end small text-nowrap {{ kleur(r.gerealiseerd) if r.gerealiseerd else '' }}">
             {% if r.gerealiseerd %}{{ teken(r.gerealiseerd) }}{{ geld(r.gerealiseerd, r.pos.valuta) }}{% else %}<span class="text-muted">—</span>{% endif %}
           </td>
+          {% endif %}
           <td class="text-end">
-            <div class="d-inline-flex gap-2 align-items-center">
+            <div class="d-inline-flex gap-1 align-items-center">
               <a href="{{ url_for('positie_bewerken', gebruiker_id=gebruiker.id, pos_id=r.pos.id) }}"
                  class="btn btn-link btn-sm text-secondary p-0 icon-action" title="Positie bewerken"
                  aria-label="{{ r.pos.ticker }} bewerken">
                 <i class="bi bi-pencil"></i>
               </a>
-              <form method="post"
-                    action="{{ url_for('positie_verwijderen', gebruiker_id=gebruiker.id, pos_id=r.pos.id) }}"
-                    onsubmit="return confirm('{{ r.pos.ticker }} verwijderen?')">
-                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                <button class="btn btn-link btn-sm text-danger p-0 icon-action" title="Verwijder"
-                        aria-label="{{ r.pos.ticker }} verwijderen">
-                  <i class="bi bi-trash3"></i>
-                </button>
-              </form>
+              {{ positie_menu(gebruiker, r.pos) }}
             </div>
           </td>
         </tr>
         {% endfor %}
       </tbody>
+      {# Colspan volgt de kolommen die daadwerkelijk gerenderd worden. Tags is de
+         enige kolom die nog op breakpoint verspringt, vandaar twee varianten. #}
+      {% set kol_basis = 2 + (1 if toon_naam else 0) + (1 if toon_aankoop else 0) + (1 if toon_koers else 0) %}
       <tfoot class="table-light fw-semibold">
         <tr>
-          <td colspan="6" class="d-none d-lg-table-cell">Totaal</td>
-          <td colspan="5" class="d-none d-sm-table-cell d-lg-none">Totaal</td>
-          <td colspan="4" class="d-sm-none">Totaal</td>
+          {% if toon_tags %}
+            <td colspan="{{ kol_basis + 1 }}" class="d-none d-lg-table-cell">Totaal</td>
+            <td colspan="{{ kol_basis }}" class="d-lg-none">Totaal</td>
+          {% else %}
+            <td colspan="{{ kol_basis }}">Totaal</td>
+          {% endif %}
           <td class="text-end">{{ eur(d.waarde) }}</td>
-          <td class="text-end d-none d-sm-table-cell {{ kleur(d.dag) }}">
+          {% if toon_koers %}
+          <td class="text-end text-nowrap {{ dagkleur(d.dag_pct) }}">
             {% if d.dag is not none %}{{ teken(d.dag) }}{{ eur(d.dag) }}{% else %}—{% endif %}
           </td>
-          <td class="text-end {{ kleur(d.winst) }}">
+          {% endif %}
+          <td class="text-end text-nowrap {{ kleur(d.winst) }}">
             {% if d.winst is not none %}{{ teken(d.winst) }}{{ eur(d.winst) }}{% else %}—{% endif %}
           </td>
-          <td class="text-end {{ kleur(d.gerealiseerd) }}">
+          {% if toon_gereal %}
+          <td class="text-end text-nowrap {{ kleur(d.gerealiseerd) }}">
             {% if d.gerealiseerd %}{{ teken(d.gerealiseerd) }}{{ eur(d.gerealiseerd) }}{% else %}—{% endif %}
           </td>
+          {% endif %}
           <td></td>
         </tr>
       </tfoot>
     </table>
   </div>
-  {% else %}
-  <div class="card-body text-muted small text-center py-3">
-    Nog geen beleggingen —
-    <a href="{{ url_for('transactie_toevoegen', gebruiker_id=gebruiker.id, account_id=d.account.id) }}">boek je eerste transactie</a>.
-  </div>
-  {% endif %}
 
   {# Cash, gerealiseerd rendement en XIRR per account #}
   <div class="card-footer bg-white d-flex justify-content-between align-items-center flex-wrap gap-3 small">
     <span class="text-muted">
       <i class="bi bi-cash-coin me-1"></i>Cash:
-      {% if d.cash %}{% for v, s in d.cash.items() %}<span class="fw-semibold ms-1">{{ geld(s, v) }}</span>{% endfor %}{% else %}—{% endif %}
+      {% if d.cash %}{% for v, s in d.cash.items() %}{% if not loop.first %}<span class="text-muted"> · </span>{% endif %}<span class="fw-semibold">{{ geld(s, v) }}</span>{% endfor %}{% else %}—{% endif %}
     </span>
     <span>
       {% if d.xirr is not none %}
@@ -431,23 +472,79 @@
     </span>
   </div>
 </div>
+{% else %}
+{# Leeg account: één regel, de rest achter 'Opties'. Anders vult een lege
+   rekening evenveel schermruimte als een gevulde. #}
+<div class="card border-0 shadow-sm mb-3">
+  <div class="card-body py-2 px-3 d-flex justify-content-between align-items-center gap-2 flex-wrap">
+    <span class="small">
+      <i class="bi bi-bank me-2 text-secondary" aria-hidden="true"></i>
+      <span class="fw-semibold">{{ d.account.naam }}</span>
+      <span class="text-muted">— nog geen beleggingen · </span>
+      <a href="{{ url_for('transactie_toevoegen', gebruiker_id=gebruiker.id, account_id=d.account.id) }}">boek je eerste transactie</a>
+    </span>
+    <button class="btn btn-link btn-sm text-decoration-none p-0" type="button"
+            data-bs-toggle="collapse" data-bs-target="#leeg-account-{{ d.account.id }}"
+            aria-expanded="false" aria-controls="leeg-account-{{ d.account.id }}">
+      Opties
+    </button>
+  </div>
+  <div class="collapse" id="leeg-account-{{ d.account.id }}">
+    <div class="card-body border-top pt-3 d-flex flex-wrap align-items-center gap-2 small">
+      <a href="{{ url_for('transacties_overzicht', gebruiker_id=gebruiker.id, account_id=d.account.id) }}"
+         class="btn btn-outline-secondary btn-sm">
+        <i class="bi bi-journals me-1" aria-hidden="true"></i>Grootboek
+      </a>
+      <a href="{{ url_for('positie_toevoegen', gebruiker_id=gebruiker.id, account_id=d.account.id) }}"
+         class="btn btn-outline-secondary btn-sm">
+        <i class="bi bi-box-arrow-in-down me-1" aria-hidden="true"></i>Bestaande positie invoeren…
+      </a>
+      {% if d.cash %}
+        <span class="text-muted ms-md-2">
+          <i class="bi bi-cash-coin me-1" aria-hidden="true"></i>Cash:
+          {% for v, saldo in d.cash.items() %}{% if not loop.first %}<span class="text-muted"> · </span>{% endif %}<span class="fw-semibold">{{ geld(saldo, v) }}</span>{% endfor %}
+        </span>
+      {% endif %}
+      <form method="post" class="ms-auto"
+            action="{{ url_for('account_verwijderen', gebruiker_id=gebruiker.id, account_id=d.account.id) }}"
+            onsubmit="return confirm('Account {{ d.account.naam }} verwijderen?\n\nAlle posities en transacties van dit account gaan mee. Dit kan niet ongedaan gemaakt worden.')">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <button class="btn btn-link btn-sm text-danger text-decoration-none p-0">
+          <i class="bi bi-trash3 me-1" aria-hidden="true"></i>Account verwijderen…
+        </button>
+      </form>
+    </div>
+  </div>
+</div>
+{% endif %}
 {% endfor %}
 
 {# ── Broker account toevoegen ──────────────────────────────────── #}
-<div class="card border-0 shadow-sm" id="account-toevoegen">
-  <div class="card-header bg-white border-bottom py-3">
-    <h6 class="mb-0 fw-semibold"><i class="bi bi-bank me-2 text-secondary"></i>Broker account toevoegen</h6>
-  </div>
-  <div class="card-body">
-    <form method="post" action="{{ url_for('account_toevoegen', gebruiker_id=gebruiker.id) }}"
-          class="d-flex gap-2">
-      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-      <input type="text" class="form-control" name="naam"
-             placeholder="bijv. DEGIRO, Peaks, Crypto" required>
-      <button class="btn btn-outline-primary" type="submit">
-        <i class="bi bi-plus-lg me-1"></i>Toevoegen
-      </button>
-    </form>
+<div id="account-toevoegen">
+  <button class="btn btn-outline-secondary btn-sm" type="button"
+          data-bs-toggle="collapse" data-bs-target="#account-toevoegen-formulier"
+          aria-expanded="false" aria-controls="account-toevoegen-formulier">
+    <i class="bi bi-bank me-1" aria-hidden="true"></i>Brokeraccount toevoegen…
+  </button>
+  <div class="collapse mt-3" id="account-toevoegen-formulier">
+    <div class="card border-0 shadow-sm">
+      <div class="card-body">
+        <form method="post" action="{{ url_for('account_toevoegen', gebruiker_id=gebruiker.id) }}"
+              class="row g-2 align-items-end">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <div class="col-12 col-sm">
+            <label for="account-naam" class="form-label small text-muted mb-1">Naam van de rekening</label>
+            <input type="text" class="form-control" id="account-naam" name="naam"
+                   placeholder="bijv. DEGIRO, Peaks, Crypto" required>
+          </div>
+          <div class="col-12 col-sm-auto">
+            <button class="btn btn-primary w-100" type="submit">
+              <i class="bi bi-plus-lg me-1" aria-hidden="true"></i>Toevoegen
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
   </div>
 </div>
 
@@ -458,6 +555,15 @@
 <script>
   const wsAll = {{ waarde_serie | tojson }};
   const fmtDatum = iso => { const [, m, d] = iso.split("-"); return `${d}-${m}`; };
+  const MAANDEN = ["jan", "feb", "mrt", "apr", "mei", "jun",
+                   "jul", "aug", "sep", "okt", "nov", "dec"];
+  const fmtMaand = iso => {
+    const [j, m] = iso.split("-");
+    return `${MAANDEN[parseInt(m, 10) - 1]} '${j.slice(2)}`;
+  };
+  // Vanaf ~4 maanden staan dagticks als een gedraaide muur onder de as. Dan
+  // alleen het eerste punt van elke maand labelen.
+  const LANGE_REEKS = 120;
   const chartKleuren = () => {
     const stijl = getComputedStyle(document.documentElement);
     return {
@@ -570,7 +676,19 @@
       layout: { padding: { top: 8 } },   // ruimte voor de marker-driehoekjes
       scales: {
         x: {
-          ticks: { color: beginKleuren.tekst },
+          ticks: {
+            color: beginKleuren.tekst,
+            autoSkip: false,
+            maxRotation: 0,
+            callback: function (waarde, index) {
+              const punt = wsHuidig[index];
+              if (!punt) return "";
+              if (wsHuidig.length <= LANGE_REEKS) return fmtDatum(punt.datum);
+              const vorige = index > 0 ? wsHuidig[index - 1] : null;
+              const zelfdeMaand = vorige && vorige.datum.slice(0, 7) === punt.datum.slice(0, 7);
+              return zelfdeMaand ? "" : fmtMaand(punt.datum);
+            },
+          },
           grid: { color: beginKleuren.raster },
         },
         y: {
@@ -608,10 +726,16 @@
 
   window.addEventListener('themawissel', werkGrafiekthemaBij);
 
-  function toonPeriode(dagen) {
+  function toonPeriode(knop) {
+    const dagen = parseInt(knop.dataset.dagen || "0", 10);
+    const periode = knop.dataset.periode || "";
     const subset = (() => {
-      if (!dagen) return wsAll;
       const laatste = new Date(wsAll[wsAll.length - 1].datum);
+      if (periode === "ytd") {
+        const jaarstart = new Date(laatste.getFullYear(), 0, 1);
+        return wsAll.filter(d => new Date(d.datum) >= jaarstart);
+      }
+      if (!dagen) return wsAll;
       const grens = new Date(laatste.getTime() - dagen * 86400000);
       return wsAll.filter(d => new Date(d.datum) >= grens);
     })();
@@ -623,10 +747,15 @@
   }
 
   document.querySelectorAll(".periode-btn").forEach(btn => {
+    btn.setAttribute("aria-pressed", btn.classList.contains("active") ? "true" : "false");
     btn.addEventListener("click", () => {
-      document.querySelectorAll(".periode-btn").forEach(b => b.classList.remove("active"));
+      document.querySelectorAll(".periode-btn").forEach(b => {
+        b.classList.remove("active");
+        b.setAttribute("aria-pressed", "false");
+      });
       btn.classList.add("active");
-      toonPeriode(parseInt(btn.dataset.dagen, 10));
+      btn.setAttribute("aria-pressed", "true");
+      toonPeriode(btn);
     });
   });
 </script>
