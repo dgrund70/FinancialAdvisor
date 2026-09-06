@@ -21,6 +21,7 @@ except ImportError:
 
 from flask import Flask, flash, redirect, render_template, request, url_for
 from flask_wtf.csrf import CSRFProtect
+from itsdangerous import BadData, URLSafeTimedSerializer
 from markupsafe import Markup, escape
 from sqlalchemy import inspect as sa_inspect, text
 from sqlalchemy.orm import selectinload
@@ -935,14 +936,14 @@ def _parse_positie_form(form):
         fouten.append("Ticker is verplicht.")
     try:
         aantal_val = float(aantal_str) if aantal_str else None
-        if aantal_val is None or aantal_val <= 0:
+        if aantal_val is None or not math.isfinite(aantal_val) or aantal_val <= 0:
             fouten.append("Aantal moet groter dan 0 zijn.")
     except ValueError:
         fouten.append("Aantal moet een getal zijn.")
         aantal_val = None
     try:
         prijs_val = float(prijs_str) if prijs_str else None
-        if prijs_val is None or prijs_val <= 0:
+        if prijs_val is None or not math.isfinite(prijs_val) or prijs_val <= 0:
             fouten.append("Aankoopprijs moet groter dan 0 zijn.")
     except ValueError:
         fouten.append("Aankoopprijs moet een getal zijn.")
@@ -953,11 +954,13 @@ def _parse_positie_form(form):
         fouten.append("Ongeldige datum.")
         datum = None
     hand_koers = None
+    if koers_type not in ("live", "handmatig"):
+        fouten.append("Ongeldig koerstype.")
     if koers_type == "handmatig":
         try:
             hand_koers = float(hand_koers_s) if hand_koers_s else None
-            if hand_koers is None:
-                fouten.append("Handmatige koers is verplicht bij type 'handmatig'.")
+            if hand_koers is None or not math.isfinite(hand_koers) or hand_koers <= 0:
+                fouten.append("Handmatige koers moet groter dan 0 zijn.")
         except ValueError:
             fouten.append("Handmatige koers moet een getal zijn.")
 
@@ -1131,11 +1134,14 @@ def positie_tags_bewerken(gebruiker_id, pos_id):
 
 # ── Transacties (grootboek) ───────────────────────────────────────
 
-def _parse_transactie_form(form, account, enforce_verkoop=True):
+def _parse_transactie_form(form, account):
     """Valideer het transactie-formulier. Geeft (waarden, fouten) terug."""
     def _getal(naam):
         s = form.get(naam, "").strip()
-        return float(s) if s else None   # kan ValueError gooien
+        waarde = float(s) if s else None   # kan ValueError gooien
+        if waarde is not None and not math.isfinite(waarde):
+            raise ValueError
+        return waarde
 
     fouten      = []
     type_val    = form.get("type", "").strip()
@@ -1157,6 +1163,8 @@ def _parse_transactie_form(form, account, enforce_verkoop=True):
     kosten = 0.0
     try:
         kosten = _getal("kosten") or 0.0
+        if kosten < 0:
+            fouten.append("Kosten mogen niet negatief zijn.")
     except ValueError:
         fouten.append("Kosten moeten een getal zijn.")
 
@@ -1185,14 +1193,6 @@ def _parse_transactie_form(form, account, enforce_verkoop=True):
         except ValueError:
             fouten.append("Bedrag moet een getal zijn.")
 
-    # Niet meer verkopen dan in bezit (alleen bij toevoegen; bij bewerken is de
-    # huidige projectie lastig te corrigeren voor de transactie zelf).
-    if enforce_verkoop and type_val == "verkoop" and ticker_val and aantal:
-        pos = Positie.query.filter_by(broker_account_id=account.id, ticker=ticker_val).first()
-        beschikbaar = (pos.aantal if pos else 0.0) or 0.0
-        if aantal > beschikbaar + 1e-9:
-            fouten.append(f"Niet genoeg stuks om te verkopen (max {beschikbaar:g}).")
-
     waarden = {
         "type": type_val, "ticker": ticker_val or None,
         "aantal": aantal, "prijs": prijs, "bedrag": bedrag,
@@ -1202,6 +1202,37 @@ def _parse_transactie_form(form, account, enforce_verkoop=True):
     if type_val in ("storting", "opname", "kosten"):
         waarden["ticker"] = None   # cash-types dragen geen ticker
     return waarden, fouten
+
+
+def _valideer_aandelenverloop(account_id, waarden, vervang_id=None):
+    """Controleer het volledige grootboek met een nieuwe/gewijzigde transactie.
+
+    Dit vangt ook teruggedateerde mutaties en verkopen ná een gewijzigde koop op.
+    """
+    records = []
+    for tx in Transactie.query.filter_by(broker_account_id=account_id).all():
+        if tx.id == vervang_id:
+            continue
+        if tx.type in ("koop", "verkoop", "correctie") and tx.ticker:
+            records.append((tx.datum, tx.id, tx.type, tx.ticker, tx.aantal or 0.0))
+    if waarden.get("type") in ("koop", "verkoop", "correctie") and waarden.get("ticker"):
+        volgorde = vervang_id if vervang_id is not None else float("inf")
+        records.append((waarden["datum"], volgorde, waarden["type"],
+                        waarden["ticker"], waarden.get("aantal") or 0.0))
+
+    bezit = {}
+    for datum, _, soort, ticker, aantal in sorted(records, key=lambda r: (r[0], r[1])):
+        huidig = bezit.get(ticker, 0.0)
+        if soort == "koop":
+            bezit[ticker] = huidig + aantal
+        elif soort == "correctie":
+            bezit[ticker] = aantal
+        elif aantal > huidig + 1e-9:
+            return (f"Niet genoeg {ticker} op {datum.strftime('%d-%m-%Y')} om "
+                    f"{aantal:g} stuks te verkopen (max {huidig:g}).")
+        else:
+            bezit[ticker] = huidig - aantal
+    return None
 
 
 def _autoriseer_account(account, gebruiker_id):
@@ -1241,6 +1272,10 @@ def transactie_toevoegen(gebruiker_id, account_id):
 
     if request.method == "POST":
         waarden, fouten = _parse_transactie_form(request.form, account)
+        if not fouten:
+            verloopfout = _valideer_aandelenverloop(account.id, waarden)
+            if verloopfout:
+                fouten.append(verloopfout)
         if fouten:
             for f in fouten:
                 flash(f, "danger")
@@ -1271,8 +1306,11 @@ def transactie_bewerken(gebruiker_id, transactie_id):
 
     if request.method == "POST":
         oude_ticker = tx.ticker
-        waarden, fouten = _parse_transactie_form(request.form, account,
-                                                 enforce_verkoop=False)
+        waarden, fouten = _parse_transactie_form(request.form, account)
+        if not fouten:
+            verloopfout = _valideer_aandelenverloop(account.id, waarden, tx.id)
+            if verloopfout:
+                fouten.append(verloopfout)
         if fouten:
             for f in fouten:
                 flash(f, "danger")
@@ -1355,19 +1393,25 @@ def _rabo_splits(account, regels):
 
 
 def _rabo_serialiseer(regels):
-    """Regels naar JSON voor het verborgen veld van het bevestigingsformulier."""
+    """Regels naar een ondertekend token voor het bevestigingsformulier."""
     uit = []
     for r in regels:
         kopie = dict(r)
         kopie["boek_datum"] = r["boek_datum"].isoformat()
         kopie["bron_datum"] = r["bron_datum"].isoformat()
         uit.append(kopie)
-    return json.dumps(uit, separators=(",", ":"))
+    return URLSafeTimedSerializer(app.config["SECRET_KEY"], salt="rabo-import").dumps(uit)
 
 
 def _rabo_deserialiseer(payload):
-    regels = json.loads(payload)
+    regels = URLSafeTimedSerializer(
+        app.config["SECRET_KEY"], salt="rabo-import"
+    ).loads(payload, max_age=30 * 60)
+    if not isinstance(regels, list):
+        raise BadData("Ongeldige importgegevens")
     for r in regels:
+        if not isinstance(r, dict):
+            raise BadData("Ongeldige importregel")
         r["boek_datum"] = date.fromisoformat(r["boek_datum"])
         r["bron_datum"] = date.fromisoformat(r["bron_datum"])
     return regels
@@ -1428,7 +1472,7 @@ def rabo_import_bevestigen(gebruiker_id, account_id):
 
     try:
         regels = _rabo_deserialiseer(request.form.get("payload", "[]"))
-    except (ValueError, TypeError):
+    except (BadData, KeyError, ValueError, TypeError):
         flash("De import is verlopen of onleesbaar. Kies het bestand opnieuw.",
               "danger")
         return terug
@@ -1810,6 +1854,8 @@ def advies_genereer(gebruiker_id):
         return {"taak_id": None,
                 "fout": "Stel eerst ANTHROPIC_API_KEY in als omgevingsvariabele."}, 400
     tag_id = request.form.get("tag_id", type=int)  # None = generiek
+    if tag_id and not Tag.query.filter_by(id=tag_id, gebruiker_id=gebruiker_id).first():
+        return {"taak_id": None, "fout": "Ongeldige tag."}, 400
     cmd = [sys.executable, str(BASE_DIR / "advies_generator.py"),
            "--gebruiker", str(gebruiker_id)]
     if tag_id:
@@ -1830,6 +1876,8 @@ def advies_team_genereer(gebruiker_id):
         return {"taak_id": None,
                 "fout": "Stel eerst ANTHROPIC_API_KEY in als omgevingsvariabele."}, 400
     tag_id = request.form.get("tag_id", type=int)  # None = generiek
+    if tag_id and not Tag.query.filter_by(id=tag_id, gebruiker_id=gebruiker_id).first():
+        return {"taak_id": None, "fout": "Ongeldige tag."}, 400
     cmd = [sys.executable, str(BASE_DIR / "advies_team.py"),
            "--gebruiker", str(gebruiker_id)]
     if tag_id:
