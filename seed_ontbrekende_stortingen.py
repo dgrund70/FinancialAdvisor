@@ -40,7 +40,9 @@ Draaien
 Zonder --boek wordt er niets weggeschreven. Met --boek maakt het script eerst
 een backup van data/app.db (data/app.db.bak_<datum>_pre_stortingen).
 
-Idempotent: slaat een account over als daar al stortingen in staan.
+Idempotent: een account met een cashsaldo van nul of hoger wordt overgeslagen,
+dus een tweede run doet niets. Werkt op elk account, ongeacht hoe gebruiker of
+account heet.
 """
 import shutil
 import sys
@@ -51,10 +53,8 @@ from app import app, db, DB_PATH
 from models import Gebruiker, BrokerAccount, Transactie
 from projectie import cash_saldi
 
-ACCOUNTS = [
-    ("Mijn account", "DEGIRO"),
-    ("Olivier",      "DEGIRO"),
-]
+# Geen vaste namen: gebruikers worden hernoemd en accounts komen erbij. Het
+# script pakt elk account met een negatief cashsaldo, in welke valuta dan ook.
 
 NOTITIE_EUR = ("Herstelboeking: storting die hoort bij de aankopen van deze dag "
                "(ontbrak in het grootboek)")
@@ -96,34 +96,26 @@ def benodigde_stortingen(account_id):
 
 def main(boeken):
     with app.app_context():
-        te_boeken = []          # (account, datum, valuta, bedrag)
-        for naam_gebruiker, naam_account in ACCOUNTS:
-            gebruiker = Gebruiker.query.filter_by(naam=naam_gebruiker).first()
-            if gebruiker is None:
-                print(f"Gebruiker {naam_gebruiker!r} bestaat niet — overgeslagen.")
-                continue
-            account = BrokerAccount.query.filter_by(
-                naam=naam_account, gebruiker_id=gebruiker.id).first()
-            if account is None:
-                print(f"Account {naam_account!r} van {naam_gebruiker!r} bestaat niet — overgeslagen.")
+        te_boeken = []          # (gebruiker, account, datum, valuta, bedrag)
+        for account in BrokerAccount.query.order_by(BrokerAccount.id).all():
+            gebruiker = db.session.get(Gebruiker, account.gebruiker_id)
+            naam = f"{gebruiker.naam if gebruiker else '?'} / {account.naam}"
+            saldi = cash_saldi(account.id)
+            tekort = {v: s for v, s in saldi.items() if s < -0.005}
+            if not tekort:
+                print(f"{naam}: cash {saldi} — niets te doen.")
                 continue
 
-            bestaand = Transactie.query.filter_by(
-                broker_account_id=account.id, type="storting").count()
-            if bestaand:
-                print(f"{naam_gebruiker} / {naam_account}: er staan al {bestaand} "
-                      "storting(en) — overgeslagen.")
-                continue
-
-            print(f"\n{naam_gebruiker} / {naam_account}")
-            print(f"  cash nu:      {cash_saldi(account.id)}")
+            print(f"\n{naam}")
+            print(f"  cash nu:      {saldi}")
             nodig = benodigde_stortingen(account.id)
             if not nodig:
-                print("  Geen tekort gevonden — niets te boeken.")
+                print("  Negatief saldo, maar geen dag met een tekort gevonden — "
+                      "handmatig nakijken.")
                 continue
             for (datum, valuta), bedrag in nodig.items():
                 print(f"    storting {datum}  {valuta} {bedrag:>10,.2f}")
-                te_boeken.append((account, datum, valuta, bedrag))
+                te_boeken.append((naam, account, datum, valuta, bedrag))
 
         if not te_boeken:
             print("\nNiets te doen.")
@@ -139,7 +131,8 @@ def main(boeken):
         shutil.copy2(DB_PATH, backup)
         print(f"\nBackup geschreven: {backup.name}")
 
-        for account, datum, valuta, bedrag in te_boeken:
+        geraakt = {}
+        for naam, account, datum, valuta, bedrag in te_boeken:
             db.session.add(Transactie(
                 broker_account_id=account.id,
                 type="storting",
@@ -150,17 +143,12 @@ def main(boeken):
                 notitie=(NOTITIE_EUR if valuta == "EUR"
                          else NOTITIE_VREEMD.format(valuta=valuta)),
             ))
+            geraakt[naam] = account.id
         db.session.commit()
 
         print("\nGeboekt. Nieuwe cashsaldi:")
-        for naam_gebruiker, naam_account in ACCOUNTS:
-            gebruiker = Gebruiker.query.filter_by(naam=naam_gebruiker).first()
-            if gebruiker is None:
-                continue
-            account = BrokerAccount.query.filter_by(
-                naam=naam_account, gebruiker_id=gebruiker.id).first()
-            if account is not None:
-                print(f"  {naam_gebruiker} / {naam_account}: {cash_saldi(account.id)}")
+        for naam, account_id in geraakt.items():
+            print(f"  {naam}: {cash_saldi(account_id)}")
 
 
 if __name__ == "__main__":
