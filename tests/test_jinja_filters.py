@@ -59,3 +59,16 @@ def test_relatieve_tijd_en_marktstatus():
     st = koersen_status(None, datetime(2026, 9, 7, 11, 0))
     assert st["relatief"] is None
     assert st["markt_open"] is True
+
+
+def test_getal_nl_zonder_valuta():
+    from app import getal_nl
+    assert getal_nl(1234.5, 1) == "1.234,5"
+    assert getal_nl(18.0, 1) == "18,0"
+    assert getal_nl(None) == "—"
+
+
+def test_bedrag_nl_maakt_van_min_nul_gewoon_nul():
+    from app import bedrag_nl
+    assert bedrag_nl(-0.001) == bedrag_nl(0.0)
+    assert "-" not in bedrag_nl(-0.001)

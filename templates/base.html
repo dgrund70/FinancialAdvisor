@@ -200,13 +200,14 @@
       e.preventDefault();
       var knop = form.querySelector('button[type=submit], button:not([type])');
       var origineel = knop ? knop.innerHTML : '';
+      var duur = form.dataset.duur ? ' (' + form.dataset.duur + ')' : '';
       if (knop) {
         knop.disabled = true;
         knop.setAttribute('aria-busy', 'true');
-        knop.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Bezig…';
+        knop.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Bezig…' + duur;
       }
       var status = document.getElementById('taak-status');
-      if (status) status.textContent = 'Gegevens worden bijgewerkt.';
+      if (status) status.textContent = 'Bezig' + (duur ? ', duurt ' + form.dataset.duur : '') + '.';
       function herstel() { if (knop) { knop.disabled = false; knop.removeAttribute('aria-busy'); knop.innerHTML = origineel; } }
 
       fetch(form.action, {

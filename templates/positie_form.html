@@ -29,7 +29,7 @@
           <div class="mb-3">
             <label for="ticker" class="form-label">Ticker</label>
             <div class="position-relative">
-              <input type="text" class="form-control text-uppercase" id="ticker" name="ticker"
+              <input type="text" class="form-control ticker-invoer" id="ticker" name="ticker"
                      placeholder="bijv. VWCE of Vanguard…" required autocomplete="off"
                      value="{{ form_data.get('ticker', '') }}" {{ 'readonly' if pos }}>
               <div id="ticker-suggesties" class="list-group position-absolute w-100 shadow-sm"

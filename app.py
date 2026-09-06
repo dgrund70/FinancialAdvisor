@@ -32,6 +32,7 @@ from models import (Advies, Aanbeveling, BenchmarkPunt, BENCHMARKS,
                     BrokerAccount, Fundamental, Gebruiker, KoersHistorie,
                     NieuwsArtikel, Positie, Tag, Transactie, TRANSACTIE_TYPES,
                     Volglijst, db)
+import advies_parser
 from projectie import (cash_saldi, herbereken_alles, herbereken_positie,
                        na_transactie_wijziging)
 from fetch_prices import is_crypto
@@ -179,6 +180,14 @@ def pct_nl(value, decimalen=1):
         return "—"
     teken = "+" if value > 0 else ""
     return f"{teken}{value:.{decimalen}f}".replace(".", ",") + "%"
+
+
+@app.template_filter("getal_nl")
+def getal_nl(value, decimalen=2):
+    """Kaal getal in Nederlandse notatie, zonder valuta of procentteken."""
+    if value is None:
+        return "—"
+    return f"{value:,.{decimalen}f}".translate(str.maketrans({",": ".", ".": ","}))
 
 
 @app.template_filter("pp_nl")
@@ -1422,9 +1431,11 @@ def transactie_toevoegen(gebruiker_id, account_id):
         return redirect(url_for("transacties_overzicht",
                                 gebruiker_id=gebruiker_id, account_id=account.id))
 
+    # Voorvullen via de querystring (?ticker=…&type=koop), zodat het advies
+    # rechtstreeks naar een ingevuld boekingsformulier kan linken.
     return render_template("transactie_form.html", gebruiker=gebruiker,
                            account=account, tx=None, types=TRANSACTIE_TYPES,
-                           form_data={}, vandaag=date.today().isoformat())
+                           form_data=request.args, vandaag=date.today().isoformat())
 
 
 @app.route("/gebruiker/<int:gebruiker_id>/transactie/<int:transactie_id>/bewerken",
@@ -1946,19 +1957,31 @@ def advies(gebruiker_id):
             if rec.ticker not in eerste_tip:
                 eerste_tip[rec.ticker] = (rec, a.gegenereerd)
     tips_prestatie = []
+    nu = datetime.now()
     for ticker, (rec, dt) in eerste_tip.items():
         huidig = koersen_nu.get(ticker, {}).get("koers")
         rendement = (((huidig - rec.instapkoers) / rec.instapkoers * 100)
                      if huidig and rec.instapkoers else None)
         tips_prestatie.append({
             "ticker":    ticker,
-            "sinds":     dt.strftime("%d-%m %H:%M"),
+            # Mét jaar: een tip van 17-06 kan uit elk jaar komen.
+            "sinds":     dt.strftime("%d-%m-%Y"),
+            "sinds_rel": _relatieve_tijd(dt, nu),
             "instap":    rec.instapkoers,
             "huidig":    huidig,
             "valuta":    rec.valuta or "",
             "rendement": round(rendement, 1) if rendement is not None else None,
         })
     tips_prestatie.sort(key=lambda t: (t["rendement"] is None, -(t["rendement"] or 0)))
+
+    # ── punt 10: samenvatting boven de tabel — het vertrouwenscijfer ──
+    met_rendement = [t["rendement"] for t in tips_prestatie if t["rendement"] is not None]
+    tips_samenvatting = {
+        "aantal":    len(tips_prestatie),
+        "gemeten":   len(met_rendement),
+        "positief":  sum(1 for r in met_rendement if r > 0),
+        "gemiddeld": (sum(met_rendement) / len(met_rendement)) if met_rendement else None,
+    }
 
     # Ticker-nieuws voor posities van deze gebruiker.
     # Eén query voor alle tickers (i.p.v. een query per positie), daarna in
@@ -1986,18 +2009,47 @@ def advies(gebruiker_id):
     volg_funds = {f.ticker: f for f in Fundamental.query
                   .filter(Fundamental.ticker.in_([v.ticker for v in volg] or [""])).all()}
     volglijst = [{"item": v, "fund": volg_funds.get(v.ticker)} for v in volg]
+    volglijst_tickers = {v.ticker.upper() for v in volg}
+
+    # Doelrekening voor "Boek deze koop": die met de meeste posities, anders de
+    # eerste. Bij meerdere rekeningen is dat een gok, maar het formulier laat de
+    # rekening zien en is één klik van het dashboard te corrigeren.
+    accounts = (BrokerAccount.query.filter_by(gebruiker_id=gebruiker_id)
+                .options(selectinload(BrokerAccount.posities))
+                .order_by(BrokerAccount.id).all())
+    koop_account = max(accounts, key=lambda a: len(a.posities), default=None)
+
+    # Punt 11: het model markeert posities met gekleurde bollen. Toon alleen de
+    # bollen die in dít advies voorkomen, met de betekenis erbij.
+    _BOLLEN = [("\U0001F7E2", "positief — houden of bijkopen"),
+               ("\U0001F7E1", "gemengd — let op, deels afbouwen of optioneel"),
+               ("\U0001F534", "negatief — verkopen of sterk reduceren"),
+               ("\U0001F535", "kans — nieuw beoordeeld, nog geen positie")]
+    advies_legenda = ([{"bol": b, "betekenis": u} for b, u in _BOLLEN
+                       if latest and b in latest.advies_tekst])
 
     return render_template(
         "advies.html",
+        advies_legenda = advies_legenda,
         gebruiker      = gebruiker,
         advies         = latest,
+        # Het advies is markdown van een taalmodel; advies_parser knipt het in
+        # ##-secties en haalt de kernboodschap en de concrete acties eruit.
+        advies_secties = advies_parser.secties(latest.advies_tekst) if latest else [],
+        advies_kern    = advies_parser.kernboodschap(latest.advies_tekst) if latest else "",
+        advies_acties  = advies_parser.hoofdacties(latest.advies_tekst) if latest else [],
+        # Punt 7: een advies praat over "vandaag", maar is een momentopname.
+        advies_leeftijd = ((datetime.now() - latest.gegenereerd).days) if latest else None,
         tag_adviezen   = tag_adviezen,
         tags           = tags,
         historie       = historie,
         waarde_serie   = waarde_serie,
         tips_prestatie = tips_prestatie,
+        tips_samenvatting = tips_samenvatting,
         ticker_nieuws  = ticker_nieuws,
         volglijst      = volglijst,
+        volglijst_tickers = volglijst_tickers,
+        koop_account   = koop_account,
         heeft_api_key  = bool(os.environ.get("ANTHROPIC_API_KEY")),
     )
 

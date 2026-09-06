@@ -16,6 +16,9 @@
   {% endif %}
 {% endmacro %}
 
+{# Kleur per soort oordeel; ook als tekstlabel leesbaar zonder kleur. #}
+{% macro verdict_klasse(soort) %}{{ 'bg-success' if soort == 'kopen' else 'bg-danger' if soort == 'verkopen' else 'bg-secondary' }}{% endmacro %}
+
 {# ── Transparantie-accordion: tussenstappen van een team-advies ─── #}
 {% macro team_accordion(adv) %}
   {% set details = adv.team_details | fromjson %}
@@ -69,19 +72,204 @@
 <div class="d-flex justify-content-between align-items-center mb-4 flex-wrap gap-2">
   <h1 class="h5 mb-0 fw-semibold"><i class="bi bi-lightbulb me-2 text-warning"></i>Adviesmodule</h1>
   <div class="d-flex gap-2 flex-wrap">
-    <form method="post" action="{{ url_for('advies_genereer', gebruiker_id=gebruiker.id) }}" data-taak>
+    <form method="post" action="{{ url_for('advies_genereer', gebruiker_id=gebruiker.id) }}"
+          data-taak data-duur="ongeveer 1 minuut">
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-      <button class="btn btn-primary btn-sm" {{ 'disabled' if not heeft_api_key }}>
-        <i class="bi bi-stars me-1"></i>Genereer advies
+      <button class="btn btn-primary btn-sm" {{ 'disabled' if not heeft_api_key }}
+              title="Eén analyse van je hele portefeuille: posities, volglijst, fundamentals en macrocijfers. Duurt ongeveer een minuut.">
+        <i class="bi bi-stars me-1" aria-hidden="true"></i>Genereer advies
       </button>
     </form>
-    <form method="post" action="{{ url_for('advies_team_genereer', gebruiker_id=gebruiker.id) }}" data-taak>
+    <form method="post" action="{{ url_for('advies_team_genereer', gebruiker_id=gebruiker.id) }}"
+          data-taak data-duur="ongeveer 3 minuten">
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
       <button class="btn btn-outline-primary btn-sm" {{ 'disabled' if not heeft_api_key }}
-              title="Vier agents (gewaagd/gemiddeld/macro-briefing/persoonlijk perspectief) + eindsynthese — duurt langer en kost iets meer dan het gewone advies.">
-        <i class="bi bi-people me-1"></i>Team-advies
+              title="Vier rollen los van elkaar — gewaagd, gemiddeld, macro-briefing en persoonlijk perspectief — plus een eindsynthese. Grondiger, duurt ongeveer drie minuten en kost meer tokens.">
+        <i class="bi bi-people me-1" aria-hidden="true"></i>Team-advies
       </button>
     </form>
+  </div>
+</div>
+
+{# ── Verdictblok: het oordeel in één oogopslag ─────────────────── #}
+{% if advies %}
+<div class="card border-0 shadow-sm mb-4 advies-verdict">
+  <div class="card-body">
+    <div class="d-flex flex-wrap align-items-center gap-2 mb-3">
+      {{ risico_badge(advies) }}
+      {% if advies.risico_reden %}<span class="text-muted small">{{ advies.risico_reden }}</span>{% endif %}
+    </div>
+    {% if advies_kern %}
+      <p class="fs-5 lh-sm mb-3 advies-prose">{{ advies_kern }}</p>
+    {% endif %}
+    {% if advies_acties %}
+    <ul class="list-unstyled mb-3 d-grid gap-2">
+      {% for a in advies_acties %}
+      <li class="d-flex align-items-center gap-2 flex-wrap">
+        <span class="badge {{ verdict_klasse(a.soort) }}">{{ a.verdict }}</span>
+        <span class="fw-semibold">{{ a.ticker }}</span>
+        <span class="text-muted small">{{ a.volledig }}</span>
+        {% if a.soort == 'kopen' and koop_account %}
+          <a class="btn btn-primary btn-sm ms-auto"
+             href="{{ url_for('transactie_toevoegen', gebruiker_id=gebruiker.id,
+                              account_id=koop_account.id, ticker=a.ticker, type='koop') }}">
+            <i class="bi bi-journal-plus me-1" aria-hidden="true"></i>Boek koop {{ a.ticker }}
+          </a>
+          {% if a.ticker | upper not in volglijst_tickers %}
+          <form method="post" action="{{ url_for('volglijst_toevoegen', gebruiker_id=gebruiker.id) }}">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <input type="hidden" name="ticker" value="{{ a.ticker }}">
+            <input type="hidden" name="notitie" value="Uit advies van {{ advies.gegenereerd.strftime('%d-%m-%Y') }}">
+            <button class="btn btn-outline-secondary btn-sm" type="submit">
+              <i class="bi bi-bookmark-plus me-1" aria-hidden="true"></i>Naar volglijst
+            </button>
+          </form>
+          {% endif %}
+        {% endif %}
+      </li>
+      {% endfor %}
+    </ul>
+    {% endif %}
+    <p class="text-muted small mb-0">
+      <i class="bi bi-info-circle me-1" aria-hidden="true"></i>
+      Dit is geen officieel financieel advies. Het is gegenereerd door een taalmodel op basis
+      van je eigen portefeuille en gecachte marktdata — controleer alles zelf voordat je boekt.
+    </p>
+  </div>
+</div>
+{% endif %}
+
+{# ── Het advies zelf, met een meelopende rail ──────────────────── #}
+<div class="row g-4 mb-4">
+  <div class="col-12 col-lg-8">
+    {% if advies %}
+    <div class="card border-0 shadow-sm">
+      <div class="card-header bg-white border-bottom d-flex justify-content-between align-items-center py-3 flex-wrap gap-2">
+        <h2 class="h6 mb-0 fw-semibold d-flex align-items-center flex-wrap gap-2">
+          <span><i class="bi bi-robot me-2 text-primary" aria-hidden="true"></i>Advies</span>
+          {% if advies_leeftijd is not none %}
+          <span class="badge fw-normal text-wrap text-start {{ 'bg-warning text-dark' if advies_leeftijd > 3 else 'bg-secondary bg-opacity-25 text-body-secondary' }}">
+            <i class="bi bi-clock-history me-1" aria-hidden="true"></i>
+            {% if advies_leeftijd == 0 %}Vandaag gegenereerd
+            {% elif advies_leeftijd == 1 %}Gisteren gegenereerd
+            {% else %}{{ advies_leeftijd }} dagen geleden gegenereerd{% endif %}
+            — macrocijfers zijn van {{ advies.gegenereerd.strftime('%d-%m-%Y') }}
+          </span>
+          {% endif %}
+        </h2>
+        <small class="text-muted d-lg-none">
+          {{ advies.gegenereerd.strftime('%d-%m-%Y %H:%M') }} &bull; {{ advies.model }}
+        </small>
+      </div>
+      {% if advies_legenda %}
+      <div class="px-3 py-2 border-bottom small text-muted d-flex flex-wrap advies-legenda">
+        {% for l in advies_legenda %}
+        <span><span aria-hidden="true">{{ l.bol }}</span> {{ l.betekenis }}</span>
+        {% endfor %}
+      </div>
+      {% endif %}
+      {% for sectie in advies_secties %}
+      <div class="border-bottom advies-sectie" id="sectie-{{ sectie.slug }}">
+        <h3 class="h6 mb-0">
+          <button class="btn btn-link w-100 text-start text-decoration-none px-3 py-3 d-flex align-items-center gap-2 advies-sectie-knop{{ '' if sectie.open else ' collapsed' }}"
+                  type="button" data-bs-toggle="collapse"
+                  data-bs-target="#sectie-body-{{ sectie.slug }}"
+                  aria-expanded="{{ 'true' if sectie.open else 'false' }}"
+                  aria-controls="sectie-body-{{ sectie.slug }}">
+            <i class="bi bi-chevron-down advies-chevron" aria-hidden="true"></i>
+            <span class="fw-semibold text-body">{{ sectie.titel }}</span>
+          </button>
+        </h3>
+        {% set verouderd = advies_leeftijd is not none and advies_leeftijd > 3
+                           and ('macro' in sectie.titel | lower or 'geopolit' in sectie.titel | lower) %}
+        <div class="collapse{{ ' show' if sectie.open }}" id="sectie-body-{{ sectie.slug }}">
+          <div class="px-3 pb-3 advies-tekst advies-prose{{ ' advies-verouderd' if verouderd }}">
+            {% if verouderd %}
+            <div class="alert alert-warning py-2 small d-flex align-items-start gap-2" role="status">
+              <i class="bi bi-exclamation-triangle mt-1" aria-hidden="true"></i>
+              <span>Deze cijfers (VIX, goud, valuta) zijn van {{ advies.gegenereerd.strftime('%d-%m-%Y') }},
+                    {{ advies_leeftijd }} dagen oud. Genereer een nieuw advies voor de actuele stand.</span>
+            </div>
+            {% endif %}
+            {{ sectie.tekst | markdown }}
+          </div>
+        </div>
+      </div>
+      {% endfor %}
+      {% if advies.team_details %}
+      <div class="p-3 border-top">
+        {{ team_accordion(advies) }}
+      </div>
+      {% endif %}
+    </div>
+    {% else %}
+    <div class="card border-0 shadow-sm">
+      <div class="card-body text-center py-5 text-muted">
+        <i class="bi bi-lightbulb fs-1 d-block mb-3" aria-hidden="true"></i>
+        <p class="mb-3">Nog geen advies gegenereerd.</p>
+        {% if heeft_api_key %}
+          <p class="small">Werk eerst de gegevens bij via de bovenbalk en klik daarna op <strong>Genereer advies</strong>.</p>
+        {% else %}
+          <p class="small">Stel <code>ANTHROPIC_API_KEY</code> in om te beginnen.</p>
+        {% endif %}
+      </div>
+    </div>
+    {% endif %}
+  </div>
+
+  {# Rail: inhoudsopgave, risicoprofiel en herkomst. Blijft meelopen op groot
+     scherm; onder lg valt hij gewoon onder het advies. #}
+  <div class="col-12 col-lg-4">
+    <div class="advies-rail">
+      {% if advies_secties %}
+      <div class="card border-0 shadow-sm mb-4">
+        <div class="card-header bg-white border-bottom py-3">
+          <h2 class="h6 mb-0 fw-semibold">
+            <i class="bi bi-list-ul me-2 text-secondary" aria-hidden="true"></i>In dit advies
+          </h2>
+        </div>
+        <nav class="list-group list-group-flush" aria-label="Secties van het advies">
+          {% for sectie in advies_secties %}
+          <a class="list-group-item list-group-item-action py-2 small d-flex justify-content-between align-items-center"
+             href="#sectie-{{ sectie.slug }}">
+            <span>{{ sectie.titel }}</span>
+            {% if not sectie.open %}<span class="badge bg-secondary bg-opacity-25 text-body-secondary fw-normal">dicht</span>{% endif %}
+          </a>
+          {% endfor %}
+        </nav>
+      </div>
+      {% endif %}
+
+      {# ── Risicoprofiel voor het team-advies ──────────────────────── #}
+      <div class="card border-0 shadow-sm mb-4">
+        <div class="card-header bg-white border-bottom py-3">
+          <h6 class="mb-0 fw-semibold">
+            <i class="bi bi-person-vcard me-2 text-secondary"></i>Mijn risicoprofiel
+          </h6>
+        </div>
+        <div class="card-body">
+          <p class="text-muted small mb-3">
+            Persoonlijke context voor de "Persoonlijk perspectief"-rol in het team-advies
+            — bijv. of dit privé- of zakelijk vermogen is, je risicohouding en horizon.
+            Zonder profiel redeneert het team vanuit een algemeen voorzichtige belegger.
+          </p>
+          <form method="post" action="{{ url_for('risicoprofiel_bijwerken', gebruiker_id=gebruiker.id) }}">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <textarea class="form-control mb-2" name="risicoprofiel" rows="4"
+                      placeholder="Bijv.: Dit is mijn privévermogen. Ik ga er voorzichtig mee om, maar wil wel waardevermeerdering — dus kansen met acceptabel risico.">{{ gebruiker.risicoprofiel or '' }}</textarea>
+            <button class="btn btn-outline-secondary btn-sm"><i class="bi bi-save me-1"></i>Opslaan</button>
+          </form>
+        </div>
+      </div>
+
+      {% if advies %}
+      <p class="text-muted small mb-0">
+        <i class="bi bi-clock-history me-1" aria-hidden="true"></i>
+        Gegenereerd {{ advies.gegenereerd.strftime('%d-%m-%Y %H:%M') }}<br>
+        <i class="bi bi-cpu me-1" aria-hidden="true"></i>{{ advies.model }}
+      </p>
+      {% endif %}
+    </div>
   </div>
 </div>
 
@@ -107,13 +295,13 @@
               {% if v.item.notitie %}<div class="text-muted small fw-normal">{{ v.item.notitie }}</div>{% endif %}
             </td>
             <td class="d-none d-md-table-cell text-muted small">
-              {% if v.fund and v.fund.sector %}{{ v.fund.sector }}{% if v.fund.pe %} · K/W {{ "%.1f"|format(v.fund.pe) }}{% endif %}{% if v.fund.aanbeveling %} · {{ v.fund.aanbeveling }}{% endif %}
+              {% if v.fund and v.fund.sector %}{{ v.fund.sector }}{% if v.fund.pe %} · K/W {{ v.fund.pe | getal_nl(1) }}{% endif %}{% if v.fund.aanbeveling %} · {{ v.fund.aanbeveling }}{% endif %}
               {% else %}<span class="fst-italic">nog geen fundamentals — werk gegevens bij via de bovenbalk</span>{% endif %}
             </td>
             <td class="text-end">
               <form method="post"
                     action="{{ url_for('volglijst_verwijderen', gebruiker_id=gebruiker.id, item_id=v.item.id) }}"
-                    onsubmit="return confirm('{{ v.item.ticker }} van de volglijst verwijderen?')">
+                    onsubmit="return confirm('{{ v.item.ticker }} van de volglijst verwijderen?\n\nHet advies weegt deze kandidaat dan niet meer mee. Dit kan niet ongedaan gemaakt worden.')">
                 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                 <button class="btn btn-link btn-sm text-danger p-0 icon-action" title="Verwijder"
                         aria-label="{{ v.item.ticker }} van volglijst verwijderen"><i class="bi bi-trash3"></i></button>
@@ -130,7 +318,7 @@
     <form method="post" action="{{ url_for('volglijst_toevoegen', gebruiker_id=gebruiker.id) }}" class="row g-2">
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
       <div class="col-6 col-sm-3">
-        <input type="text" class="form-control text-uppercase" name="ticker"
+        <input type="text" class="form-control ticker-invoer" name="ticker"
                placeholder="bijv. ASML.AS" required>
       </div>
       <div class="col">
@@ -152,6 +340,17 @@
       <span class="text-muted fw-normal small">· rendement sinds eerste aanbeveling</span>
     </h6>
   </div>
+  {% if tips_samenvatting.gemeten %}
+  <div class="card-body border-bottom py-3 d-flex flex-wrap align-items-baseline gap-3 column-gap-4">
+    <span><span class="fs-5 fw-bold">{{ tips_samenvatting.aantal }}</span>
+      <span class="text-muted small">tips gevolgd</span></span>
+    <span><span class="fs-5 fw-bold">{{ tips_samenvatting.positief }}</span>
+      <span class="text-muted small">van de {{ tips_samenvatting.gemeten }} in de plus</span></span>
+    <span><span class="fs-5 fw-bold {{ 'pos' if tips_samenvatting.gemiddeld > 0 else 'neg' if tips_samenvatting.gemiddeld < 0 else '' }}">
+      {{ tips_samenvatting.gemiddeld | pct_nl(1) }}</span>
+      <span class="text-muted small">gemiddeld rendement</span></span>
+  </div>
+  {% endif %}
   <div class="table-responsive">
     <table class="table table-sm table-hover align-middle mb-0">
       <thead class="table-light">
@@ -167,20 +366,17 @@
         {% for t in tips_prestatie %}
         <tr>
           <td class="fw-semibold">{{ t.ticker }}</td>
-          <td class="d-none d-sm-table-cell text-muted small">{{ t.sinds }}</td>
-          <td class="text-end small">
-            {% if t.instap %}{{ "%.2f"|format(t.instap) }} {{ t.valuta }}{% else %}—{% endif %}
+          <td class="d-none d-sm-table-cell text-muted small text-nowrap">
+            {{ t.sinds }}<span class="d-none d-lg-inline"> · {{ t.sinds_rel }}</span>
           </td>
-          <td class="text-end small">
-            {% if t.huidig %}{{ "%.2f"|format(t.huidig) }} {{ t.valuta }}
-            {% else %}<span class="text-muted">—</span>{% endif %}
-          </td>
+          <td class="text-end small text-nowrap">{{ t.instap | bedrag_nl(t.valuta) }}</td>
+          <td class="text-end small text-nowrap">{{ t.huidig | bedrag_nl(t.valuta) }}</td>
           <td class="text-end fw-semibold
               {{ 'pos' if t.rendement and t.rendement > 0
                  else 'neg' if t.rendement and t.rendement < 0
                  else 'text-muted' }}">
             {% if t.rendement is not none %}
-              {{ '+' if t.rendement > 0 else '' }}{{ t.rendement }}%
+              {{ t.rendement | pct_nl(1) }}
             {% else %}
               <span class="text-muted small">werk gegevens bij</span>
             {% endif %}
@@ -193,212 +389,153 @@
 </div>
 {% endif %}
 
-<div class="row g-4">
-
-  {# ── Linkerkolom: generiek advies + tag-adviezen ─────────────── #}
-  <div class="col-12 col-lg-7">
-
-    {# Generiek advies #}
-    {% if advies %}
-    <div class="card border-0 shadow-sm mb-4">
-      <div class="card-header bg-white border-bottom d-flex justify-content-between align-items-center py-3 flex-wrap gap-2">
-        <h6 class="mb-0 fw-semibold">
-          <i class="bi bi-robot me-2 text-primary"></i>Generiek advies
-          {{ risico_badge(advies) }}
-        </h6>
-        <small class="text-muted">
-          {{ advies.gegenereerd.strftime('%d-%m-%Y %H:%M') }} &bull; {{ advies.model }}
-        </small>
-      </div>
-      <div class="card-body advies-tekst">
-        {% if advies.risico_score %}
-        <div class="alert alert-{{ _risico_kleuren.get(advies.risico_score, 'secondary') }} bg-opacity-10 border-0 py-2 small mb-3">
-          <strong>Risiconiveau {{ advies.risico_score }}/5 — {{ _risico_labels.get(advies.risico_score, '?') }}.</strong>
-          {{ advies.risico_reden or '' }}
-        </div>
-        {% endif %}
-        {{ advies.advies_tekst | markdown }}
-        {{ team_accordion(advies) }}
-      </div>
-    </div>
-    {% else %}
-    <div class="card border-0 shadow-sm mb-4">
-      <div class="card-body text-center py-5 text-muted">
-        <i class="bi bi-lightbulb fs-1 d-block mb-3"></i>
-        <p class="mb-3">Nog geen advies gegenereerd.</p>
-        {% if heeft_api_key %}
-          <p class="small">Werk eerst de gegevens bij via de bovenbalk en klik daarna op <strong>Genereer advies</strong>.</p>
-        {% else %}
-          <p class="small">Stel <code>ANTHROPIC_API_KEY</code> in om te beginnen.</p>
-        {% endif %}
-      </div>
-    </div>
-    {% endif %}
-
-    {# Tag-adviezen #}
-    {% if tags %}
-    <div class="card border-0 shadow-sm mb-4">
-      <div class="card-header bg-white border-bottom py-3">
-        <h6 class="mb-0 fw-semibold">
-          <i class="bi bi-tags me-2 text-primary"></i>Advies per tag
-        </h6>
-      </div>
-      <div class="accordion accordion-flush" id="tagAdviezen">
-        {% for tag in tags %}
-        <div class="accordion-item border-0 border-bottom">
-          <h2 class="accordion-header">
-            <button class="accordion-button collapsed py-3" type="button"
-                    data-bs-toggle="collapse" data-bs-target="#tag-adv-{{ tag.id }}">
-              <span class="badge bg-primary bg-opacity-10 text-primary border border-primary-subtle me-2">
-                {{ tag.naam }}
-              </span>
-              {% if tag_adviezen.get(tag) %}
-                <small class="text-muted ms-2">
-                  {{ tag_adviezen[tag].gegenereerd.strftime('%d-%m-%Y %H:%M') }}
-                </small>
-              {% else %}
-                <small class="text-muted ms-2">Nog geen advies</small>
-              {% endif %}
-            </button>
-          </h2>
-          <div id="tag-adv-{{ tag.id }}" class="accordion-collapse collapse"
-               data-bs-parent="#tagAdviezen">
-            <div class="accordion-body">
-              {% if tag_adviezen.get(tag) %}
-                <div class="advies-tekst">
-                  {{ tag_adviezen[tag].advies_tekst | markdown }}
-                  {{ team_accordion(tag_adviezen[tag]) }}
-                </div>
-              {% endif %}
-              <div class="d-flex gap-2 flex-wrap mt-3">
-                <form method="post" action="{{ url_for('advies_genereer', gebruiker_id=gebruiker.id) }}" data-taak>
-                  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                  <input type="hidden" name="tag_id" value="{{ tag.id }}">
-                  <button class="btn btn-outline-primary btn-sm" {{ 'disabled' if not heeft_api_key }}>
-                    <i class="bi bi-stars me-1"></i>Genereer advies voor "{{ tag.naam }}"
-                  </button>
-                </form>
-                <form method="post" action="{{ url_for('advies_team_genereer', gebruiker_id=gebruiker.id) }}" data-taak>
-                  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                  <input type="hidden" name="tag_id" value="{{ tag.id }}">
-                  <button class="btn btn-outline-secondary btn-sm" {{ 'disabled' if not heeft_api_key }}>
-                    <i class="bi bi-people me-1"></i>Team-advies voor "{{ tag.naam }}"
-                  </button>
-                </form>
-              </div>
-            </div>
-          </div>
-        </div>
-        {% endfor %}
-      </div>
-    </div>
-    {% endif %}
-
-    {# Advieshistorie #}
-    {% if historie %}
-    <div class="card border-0 shadow-sm mb-4">
-      <div class="card-header bg-white border-bottom py-3">
-        <h6 class="mb-0 fw-semibold">
-          <i class="bi bi-clock-history me-2 text-secondary"></i>Eerdere adviezen
-          <span class="text-muted fw-normal small">· laatste 14 dagen</span>
-        </h6>
-      </div>
-      <div class="accordion accordion-flush" id="adviesHistorie">
-        {% for ouder in historie %}
-        <div class="accordion-item border-0 border-bottom">
-          <h2 class="accordion-header">
-            <button class="accordion-button collapsed py-2" type="button"
-                    data-bs-toggle="collapse" data-bs-target="#adv-{{ ouder.id }}">
-              <i class="bi bi-robot me-2 text-primary"></i>
-              {{ ouder.gegenereerd.strftime('%d-%m-%Y %H:%M') }}
-              <span class="badge bg-light text-muted border ms-2 fw-normal">{{ ouder.model }}</span>
-              {{ risico_badge(ouder) }}
-            </button>
-          </h2>
-          <div id="adv-{{ ouder.id }}" class="accordion-collapse collapse"
-               data-bs-parent="#adviesHistorie">
-            <div class="accordion-body advies-tekst">
-              {{ ouder.advies_tekst | markdown }}
-              {{ team_accordion(ouder) }}
-            </div>
-          </div>
-        </div>
-        {% endfor %}
-      </div>
-    </div>
-    {% endif %}
-
+{# Tag-adviezen #}
+{% if tags %}
+<div class="card border-0 shadow-sm mb-4">
+  <div class="card-header bg-white border-bottom py-3">
+    <h6 class="mb-0 fw-semibold">
+      <i class="bi bi-tags me-2 text-primary"></i>Advies per tag
+    </h6>
   </div>
-
-  {# ── Rechterkolom: nieuws per positie ─────────────────────────── #}
-  <div class="col-12 col-lg-5">
-
-    {# ── Risicoprofiel voor het team-advies ──────────────────────── #}
-    <div class="card border-0 shadow-sm mb-4">
-      <div class="card-header bg-white border-bottom py-3">
-        <h6 class="mb-0 fw-semibold">
-          <i class="bi bi-person-vcard me-2 text-secondary"></i>Mijn risicoprofiel
-        </h6>
-      </div>
-      <div class="card-body">
-        <p class="text-muted small mb-3">
-          Persoonlijke context voor de "Persoonlijk perspectief"-rol in het team-advies
-          — bijv. of dit privé- of zakelijk vermogen is, je risicohouding en horizon.
-          Zonder profiel redeneert het team vanuit een algemeen voorzichtige belegger.
-        </p>
-        <form method="post" action="{{ url_for('risicoprofiel_bijwerken', gebruiker_id=gebruiker.id) }}">
+  <div class="accordion accordion-flush" id="tagAdviezen">
+    {% for tag in tags %}
+    <div class="accordion-item border-0 border-bottom">
+      <h2 class="accordion-header d-flex align-items-center gap-2 pe-3">
+        <button class="accordion-button collapsed py-3" type="button"
+                data-bs-toggle="collapse" data-bs-target="#tag-adv-{{ tag.id }}">
+          <span class="badge bg-primary bg-opacity-10 text-primary border border-primary-subtle me-2">
+            {{ tag.naam }}
+          </span>
+          {% if tag_adviezen.get(tag) %}
+            <small class="text-muted ms-2">
+              {{ tag_adviezen[tag].gegenereerd.strftime('%d-%m-%Y %H:%M') }}
+            </small>
+          {% else %}
+            <small class="text-muted ms-2">Nog geen advies</small>
+          {% endif %}
+        </button>
+        {# Zonder advies moet de uitweg zichtbaar zijn zonder eerst uit te klappen. #}
+        {% if not tag_adviezen.get(tag) %}
+        <form method="post" action="{{ url_for('advies_genereer', gebruiker_id=gebruiker.id) }}"
+              class="flex-shrink-0" data-taak>
           <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-          <textarea class="form-control mb-2" name="risicoprofiel" rows="4"
-                    placeholder="Bijv.: Dit is mijn privévermogen. Ik ga er voorzichtig mee om, maar wil wel waardevermeerdering — dus kansen met acceptabel risico.">{{ gebruiker.risicoprofiel or '' }}</textarea>
-          <button class="btn btn-outline-secondary btn-sm"><i class="bi bi-save me-1"></i>Opslaan</button>
+          <input type="hidden" name="tag_id" value="{{ tag.id }}">
+          <button class="btn btn-outline-primary btn-sm text-nowrap" {{ 'disabled' if not heeft_api_key }}
+                  title="Genereert een advies dat alleen kijkt naar de posities met de tag &quot;{{ tag.naam }}&quot;.">
+            <i class="bi bi-stars me-1" aria-hidden="true"></i>Genereer advies
+          </button>
         </form>
-      </div>
-    </div>
-
-    {% if ticker_nieuws %}
-    <div class="card border-0 shadow-sm mb-4">
-      <div class="card-header bg-white border-bottom py-3">
-        <h6 class="mb-0 fw-semibold">
-          <i class="bi bi-newspaper me-2 text-secondary"></i>Nieuws per positie
-        </h6>
-      </div>
-      <div class="accordion accordion-flush" id="tickerNieuws">
-        {% for ticker, artikelen in ticker_nieuws.items() %}
-        <div class="accordion-item border-0 border-bottom">
-          <h2 class="accordion-header">
-            <button class="accordion-button collapsed py-2 fw-semibold" type="button"
-                    data-bs-toggle="collapse"
-                    data-bs-target="#tn-{{ ticker | replace('.', '-') }}">
-              {{ ticker }}
-              <span class="badge bg-secondary ms-2 fw-normal">{{ artikelen | length }}</span>
-            </button>
-          </h2>
-          <div id="tn-{{ ticker | replace('.', '-') }}" class="accordion-collapse collapse"
-               data-bs-parent="#tickerNieuws">
-            <ul class="list-group list-group-flush">
-              {% for art in artikelen %}
-              <li class="list-group-item py-2 px-3">
-                <a href="{{ art.url }}" target="_blank" rel="noopener"
-                   class="text-decoration-none text-body">
-                  {{ art.titel }}
-                </a>
-                <div class="text-muted small mt-1">
-                  {{ art.bron }}
-                  {% if art.gepubliceerd %}
-                    &bull; {{ art.gepubliceerd.strftime('%d-%m %H:%M') }}
-                  {% endif %}
-                </div>
-              </li>
-              {% endfor %}
-            </ul>
+        {% endif %}
+      </h2>
+      <div id="tag-adv-{{ tag.id }}" class="accordion-collapse collapse"
+           data-bs-parent="#tagAdviezen">
+        <div class="accordion-body">
+          {% if tag_adviezen.get(tag) %}
+            <div class="advies-tekst">
+              {{ tag_adviezen[tag].advies_tekst | markdown }}
+              {{ team_accordion(tag_adviezen[tag]) }}
+            </div>
+          {% endif %}
+          <div class="d-flex gap-2 flex-wrap mt-3">
+            <form method="post" action="{{ url_for('advies_genereer', gebruiker_id=gebruiker.id) }}" data-taak>
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              <input type="hidden" name="tag_id" value="{{ tag.id }}">
+              <button class="btn btn-outline-primary btn-sm" {{ 'disabled' if not heeft_api_key }}>
+                <i class="bi bi-stars me-1"></i>Genereer advies voor "{{ tag.naam }}"
+              </button>
+            </form>
+            <form method="post" action="{{ url_for('advies_team_genereer', gebruiker_id=gebruiker.id) }}" data-taak>
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              <input type="hidden" name="tag_id" value="{{ tag.id }}">
+              <button class="btn btn-outline-secondary btn-sm" {{ 'disabled' if not heeft_api_key }}>
+                <i class="bi bi-people me-1"></i>Team-advies voor "{{ tag.naam }}"
+              </button>
+            </form>
           </div>
         </div>
-        {% endfor %}
       </div>
     </div>
-    {% endif %}
-
+    {% endfor %}
   </div>
 </div>
+{% endif %}
+
+{# Advieshistorie #}
+{% if historie %}
+<div class="card border-0 shadow-sm mb-4">
+  <div class="card-header bg-white border-bottom py-3">
+    <h6 class="mb-0 fw-semibold">
+      <i class="bi bi-clock-history me-2 text-secondary"></i>Eerdere adviezen
+      <span class="text-muted fw-normal small">· laatste 14 dagen</span>
+    </h6>
+  </div>
+  <div class="accordion accordion-flush" id="adviesHistorie">
+    {% for ouder in historie %}
+    <div class="accordion-item border-0 border-bottom">
+      <h2 class="accordion-header">
+        <button class="accordion-button collapsed py-2" type="button"
+                data-bs-toggle="collapse" data-bs-target="#adv-{{ ouder.id }}">
+          <i class="bi bi-robot me-2 text-primary"></i>
+          {{ ouder.gegenereerd.strftime('%d-%m-%Y %H:%M') }}
+          <span class="badge bg-light text-muted border ms-2 fw-normal">{{ ouder.model }}</span>
+          {{ risico_badge(ouder) }}
+        </button>
+      </h2>
+      <div id="adv-{{ ouder.id }}" class="accordion-collapse collapse"
+           data-bs-parent="#adviesHistorie">
+        <div class="accordion-body advies-tekst">
+          {{ ouder.advies_tekst | markdown }}
+          {{ team_accordion(ouder) }}
+        </div>
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+</div>
+{% endif %}
+
+{% if ticker_nieuws %}
+<div class="card border-0 shadow-sm mb-4">
+  <div class="card-header bg-white border-bottom py-3">
+    <h6 class="mb-0 fw-semibold">
+      <i class="bi bi-newspaper me-2 text-secondary"></i>Nieuws per positie
+    </h6>
+  </div>
+  <div class="accordion accordion-flush" id="tickerNieuws">
+    {% for ticker, artikelen in ticker_nieuws.items() %}
+    <div class="accordion-item border-0 border-bottom">
+      <h2 class="accordion-header">
+        <button class="accordion-button collapsed py-2 fw-semibold" type="button"
+                data-bs-toggle="collapse"
+                data-bs-target="#tn-{{ ticker | replace('.', '-') }}">
+          {{ ticker }}
+          <span class="badge bg-secondary ms-2 fw-normal">{{ artikelen | length }}</span>
+        </button>
+      </h2>
+      <div id="tn-{{ ticker | replace('.', '-') }}" class="accordion-collapse collapse"
+           data-bs-parent="#tickerNieuws">
+        <ul class="list-group list-group-flush">
+          {% for art in artikelen %}
+          <li class="list-group-item py-2 px-3">
+            <a href="{{ art.url }}" target="_blank" rel="noopener"
+               class="text-decoration-none text-body">
+              {{ art.titel }}
+            </a>
+            <div class="text-muted small mt-1">
+              {{ art.bron }}
+              {% if art.gepubliceerd %}
+                &bull; {{ art.gepubliceerd.strftime('%d-%m %H:%M') }}
+              {% endif %}
+            </div>
+          </li>
+          {% endfor %}
+        </ul>
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+</div>
+{% endif %}
+
 
 {% endblock %}
