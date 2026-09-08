@@ -87,6 +87,14 @@
             title="Vier rollen los van elkaar — gewaagd, gemiddeld, macro-briefing en persoonlijk perspectief — plus een eindsynthese. Grondiger, duurt ongeveer drie minuten en kost meer tokens.">
       <i class="bi bi-people me-1" aria-hidden="true"></i>Team-advies…
     </button>
+    <button class="btn btn-outline-primary btn-sm" type="button"
+            data-bs-toggle="collapse" data-bs-target="#team-opties"
+            data-focus="#team-vraag"
+            aria-expanded="false" aria-controls="team-opties"
+            {{ 'disabled' if not heeft_api_key }}
+            title="Eén vraag, één antwoord. Geen nieuwe analyse van je hele portefeuille, maar je posities gaan wel mee als context. Duurt een halve minuut.">
+      <i class="bi bi-chat-dots me-1" aria-hidden="true"></i>Stel een vraag…
+    </button>
   </div>
 </div>
 
@@ -359,7 +367,7 @@
     </h2>
     <button class="btn btn-outline-secondary btn-sm" type="button"
             data-bs-toggle="collapse" data-bs-target="#team-opties"
-            aria-controls="team-opties">
+            data-focus="#team-vraag" aria-controls="team-opties">
       <i class="bi bi-plus-lg me-1" aria-hidden="true"></i>Nieuwe vraag
     </button>
   </div>
@@ -743,6 +751,27 @@
   }, { rootMargin: '-20% 0px -70% 0px' });
   secties.forEach(function (el) { waarnemer.observe(el); });
 })();
+</script>
+
+{# Een knop met data-focus klapt het paneel open én zet de cursor in het veld
+   dat erbij hoort — anders land je bovenaan een paneel met twee kaarten. #}
+<script>
+document.querySelectorAll('[data-focus]').forEach(function (knop) {
+  knop.addEventListener('click', function () {
+    var doel = document.querySelector(knop.dataset.focus);
+    if (!doel) return;
+    var paneel = document.querySelector(knop.dataset.bsTarget);
+    function focus() {
+      doel.focus({ preventScroll: true });
+      doel.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    }
+    if (paneel && !paneel.classList.contains('show')) {
+      paneel.addEventListener('shown.bs.collapse', focus, { once: true });
+    } else {
+      focus();
+    }
+  });
+});
 </script>
 
 {% endblock %}
