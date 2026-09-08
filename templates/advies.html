@@ -80,14 +80,91 @@
         <i class="bi bi-stars me-1" aria-hidden="true"></i>Genereer advies
       </button>
     </form>
-    <form method="post" action="{{ url_for('advies_team_genereer', gebruiker_id=gebruiker.id) }}"
-          data-taak data-duur="ongeveer 3 minuten">
-      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-      <button class="btn btn-outline-primary btn-sm" {{ 'disabled' if not heeft_api_key }}
-              title="Vier rollen los van elkaar — gewaagd, gemiddeld, macro-briefing en persoonlijk perspectief — plus een eindsynthese. Grondiger, duurt ongeveer drie minuten en kost meer tokens.">
-        <i class="bi bi-people me-1" aria-hidden="true"></i>Team-advies
-      </button>
-    </form>
+    <button class="btn btn-outline-primary btn-sm" type="button"
+            data-bs-toggle="collapse" data-bs-target="#team-opties"
+            aria-expanded="false" aria-controls="team-opties"
+            {{ 'disabled' if not heeft_api_key }}
+            title="Vier rollen los van elkaar — gewaagd, gemiddeld, macro-briefing en persoonlijk perspectief — plus een eindsynthese. Grondiger, duurt ongeveer drie minuten en kost meer tokens.">
+      <i class="bi bi-people me-1" aria-hidden="true"></i>Team-advies…
+    </button>
+  </div>
+</div>
+
+{# ── Team: een volledig advies met een doel, of één losse vraag ── #}
+<div class="collapse mb-4" id="team-opties">
+  <div class="row g-3">
+
+    <div class="col-12 col-lg-6">
+      <div class="card border-0 shadow-sm h-100">
+        <div class="card-header bg-white border-bottom py-3">
+          <h2 class="h6 mb-0 fw-semibold">
+            <i class="bi bi-people me-2 text-primary" aria-hidden="true"></i>Volledig team-advies
+          </h2>
+        </div>
+        <div class="card-body">
+          <p class="text-muted small">
+            Vier rollen beoordelen je hele portefeuille, daarna één synthese.
+            Waar je voor belegt stuurt het oordeel: een advies voor pensioen over
+            twintig jaar ziet er anders uit dan voor geld dat je over twee jaar nodig hebt.
+          </p>
+          <form method="post" action="{{ url_for('advies_team_genereer', gebruiker_id=gebruiker.id) }}"
+                data-taak data-duur="ongeveer 3 minuten">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <div class="mb-2">
+              <label for="team-doel" class="form-label small text-muted mb-1">Waar beleg je voor?</label>
+              <select class="form-select form-select-sm" id="team-doel" name="doel">
+                <option value="">Geen specifiek doel — algemeen advies</option>
+                <option>Pensioen — lange horizon, groei mag voorgaan</option>
+                <option>Sparen voor een doel binnen 5 jaar — kapitaal moet er zijn</option>
+                <option>Vermogensgroei — lange termijn, schommelingen acceptabel</option>
+                <option>Inkomen — dividend en stabiliteit</option>
+                <option>Kapitaalbehoud — zo min mogelijk risico</option>
+              </select>
+            </div>
+            <div class="mb-3">
+              <label for="team-toelichting" class="form-label small text-muted mb-1">
+                Toelichting <span class="fw-normal">(optioneel)</span>
+              </label>
+              <input type="text" class="form-control form-control-sm" id="team-toelichting"
+                     name="doel_toelichting" maxlength="200"
+                     placeholder="bijv. horizon 20 jaar, maandelijkse inleg van € 250">
+            </div>
+            <button class="btn btn-primary btn-sm" {{ 'disabled' if not heeft_api_key }}>
+              <i class="bi bi-people me-1" aria-hidden="true"></i>Start team-advies
+            </button>
+          </form>
+        </div>
+      </div>
+    </div>
+
+    <div class="col-12 col-lg-6">
+      <div class="card border-0 shadow-sm h-100">
+        <div class="card-header bg-white border-bottom py-3">
+          <h2 class="h6 mb-0 fw-semibold">
+            <i class="bi bi-chat-dots me-2 text-primary" aria-hidden="true"></i>Stel het team een vraag
+          </h2>
+        </div>
+        <div class="card-body">
+          <p class="text-muted small">
+            Eén vraag, één antwoord — geen nieuwe analyse van je hele portefeuille.
+            Je posities, risicocijfers en volglijst gaan wél mee als context, zodat
+            het antwoord over jouw situatie gaat. Duurt een halve minuut.
+          </p>
+          <form method="post" action="{{ url_for('advies_vraag_stellen', gebruiker_id=gebruiker.id) }}"
+                data-taak data-duur="ongeveer 30 seconden">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <label for="team-vraag" class="form-label small text-muted mb-1">Je vraag</label>
+            <textarea class="form-control form-control-sm mb-3" id="team-vraag" name="vraag"
+                      rows="3" maxlength="1000" required
+                      placeholder="bijv. Is het slim om nu een obligatiefonds toe te voegen? Of: wat betekent een sterkere euro voor mijn Amerikaanse posities?"></textarea>
+            <button class="btn btn-primary btn-sm" {{ 'disabled' if not heeft_api_key }}>
+              <i class="bi bi-send me-1" aria-hidden="true"></i>Vraag stellen
+            </button>
+          </form>
+        </div>
+      </div>
+    </div>
+
   </div>
 </div>
 
@@ -230,10 +307,9 @@
         </div>
         <nav class="list-group list-group-flush" aria-label="Secties van het advies">
           {% for sectie in advies_secties %}
-          <a class="list-group-item list-group-item-action py-2 small d-flex justify-content-between align-items-center"
-             href="#sectie-{{ sectie.slug }}">
-            <span>{{ sectie.titel }}</span>
-            {% if not sectie.open %}<span class="badge bg-secondary bg-opacity-25 text-body-secondary fw-normal">dicht</span>{% endif %}
+          <a class="list-group-item list-group-item-action py-2 small rail-link"
+             href="#sectie-{{ sectie.slug }}" data-sectie="{{ sectie.slug }}">
+            {{ sectie.titel }}
           </a>
           {% endfor %}
         </nav>
@@ -272,6 +348,56 @@
     </div>
   </div>
 </div>
+
+{# ── Vragen aan het team ───────────────────────────────────────── #}
+{% if team_vragen %}
+<div class="card border-0 shadow-sm mb-4">
+  <div class="card-header bg-white border-bottom py-3 d-flex justify-content-between align-items-center flex-wrap gap-2">
+    <h2 class="h6 mb-0 fw-semibold">
+      <i class="bi bi-chat-dots me-2 text-primary" aria-hidden="true"></i>Vragen aan het team
+      <span class="text-muted fw-normal small">· laatste {{ team_vragen | length }}</span>
+    </h2>
+    <button class="btn btn-outline-secondary btn-sm" type="button"
+            data-bs-toggle="collapse" data-bs-target="#team-opties"
+            aria-controls="team-opties">
+      <i class="bi bi-plus-lg me-1" aria-hidden="true"></i>Nieuwe vraag
+    </button>
+  </div>
+  <div class="accordion accordion-flush" id="teamVragen">
+    {% for v in team_vragen %}
+    <div class="accordion-item border-0 border-bottom">
+      <h3 class="accordion-header d-flex align-items-center gap-2 pe-3">
+        <button class="accordion-button {{ '' if loop.first else 'collapsed' }} py-3" type="button"
+                data-bs-toggle="collapse" data-bs-target="#vraag-{{ v.id }}"
+                aria-expanded="{{ 'true' if loop.first else 'false' }}"
+                aria-controls="vraag-{{ v.id }}">
+          <span class="text-body">{{ v.vraag }}</span>
+          <small class="text-muted ms-2 flex-shrink-0">{{ v.gesteld.strftime('%d-%m-%Y %H:%M') }}</small>
+        </button>
+        <form method="post" class="flex-shrink-0"
+              action="{{ url_for('advies_vraag_verwijderen', gebruiker_id=gebruiker.id, vraag_id=v.id) }}"
+              onsubmit="return confirm('Deze vraag en het antwoord verwijderen?\n\nDit kan niet ongedaan gemaakt worden.')">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <button class="btn btn-link btn-sm text-danger p-0 icon-action" type="submit"
+                  title="Vraag verwijderen" aria-label="Vraag van {{ v.gesteld.strftime('%d-%m-%Y') }} verwijderen">
+            <i class="bi bi-trash3"></i>
+          </button>
+        </form>
+      </h3>
+      <div id="vraag-{{ v.id }}" class="accordion-collapse collapse{{ ' show' if loop.first }}"
+           data-bs-parent="#teamVragen">
+        <div class="accordion-body advies-tekst advies-prose">
+          {{ v.antwoord | markdown if v.antwoord else '<em>Nog geen antwoord.</em>' | safe }}
+          <p class="text-muted small mt-3 mb-0">
+            {{ v.model }}{% if v.context_tekens %} · {{ (v.context_tekens // 4) }} tokens context meegegeven{% endif %}
+          </p>
+        </div>
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+</div>
+{% endif %}
 
 {# ── Volglijst (kandidaten voor het advies) ────────────────────── #}
 <div class="card border-0 shadow-sm mb-4">
@@ -315,11 +441,43 @@
     {% else %}
     <p class="text-muted small mb-3">Nog geen kandidaten. Voeg tickers toe die je overweegt; het advies beoordeelt ze met echte fundamentals.</p>
     {% endif %}
+    {% if ticker_suggesties %}
+    <div class="alert alert-warning" role="alert">
+      {% if ticker_suggesties.opties %}
+        <p class="mb-2">
+          <i class="bi bi-question-circle me-1" aria-hidden="true"></i>
+          <strong>{{ ticker_suggesties.invoer }}</strong> is geen bekende ticker. Bedoelde je er één van deze?
+        </p>
+        <div class="d-flex flex-wrap gap-2">
+          {% for o in ticker_suggesties.opties %}
+          <form method="post" action="{{ url_for('volglijst_toevoegen', gebruiker_id=gebruiker.id) }}">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <input type="hidden" name="ticker" value="{{ o.symbol }}">
+            <input type="hidden" name="notitie" value="{{ ticker_suggesties.notitie }}">
+            <input type="hidden" name="bevestigd" value="1">
+            <button class="btn btn-sm btn-outline-dark text-start" type="submit">
+              <span class="fw-semibold">{{ o.symbol }}</span>
+              <span class="text-muted small d-block">{{ o.naam }}{% if o.beurs %} · {{ o.beurs }}{% endif %}</span>
+            </button>
+          </form>
+          {% endfor %}
+        </div>
+      {% else %}
+        <p class="mb-0">
+          <i class="bi bi-x-circle me-1" aria-hidden="true"></i>
+          <strong>Onbekende ticker: {{ ticker_suggesties.invoer }}.</strong>
+          De koersenbron kent dit symbool niet. Zoek het op bij je broker — een
+          Amsterdamse notering eindigt meestal op <code>.AS</code>, een Duitse op <code>.DE</code>.
+        </p>
+      {% endif %}
+    </div>
+    {% endif %}
     <form method="post" action="{{ url_for('volglijst_toevoegen', gebruiker_id=gebruiker.id) }}" class="row g-2">
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
       <div class="col-6 col-sm-3">
         <input type="text" class="form-control ticker-invoer" name="ticker"
-               placeholder="bijv. ASML.AS" required>
+               placeholder="bijv. ASML.AS" required
+               value="{{ ticker_suggesties.invoer if ticker_suggesties else '' }}">
       </div>
       <div class="col">
         <input type="text" class="form-control" name="notitie" placeholder="Notitie (optioneel)" maxlength="200">
@@ -537,5 +695,54 @@
 </div>
 {% endif %}
 
+
+{# Rail volgt het advies: markeer de sectie waar je bent, en klap een dichte
+   sectie open als je erheen springt. #}
+<script>
+(function () {
+  var links = Array.prototype.slice.call(document.querySelectorAll('.rail-link'));
+  if (!links.length) return;
+  var secties = links
+    .map(function (a) { return document.getElementById('sectie-' + a.dataset.sectie); })
+    .filter(Boolean);
+
+  function markeer(slug) {
+    links.forEach(function (a) {
+      var actief = a.dataset.sectie === slug;
+      a.classList.toggle('active', actief);
+      if (actief) { a.setAttribute('aria-current', 'true'); }
+      else { a.removeAttribute('aria-current'); }
+    });
+  }
+
+  // Klik: dichte sectie eerst openklappen, anders spring je naar een titelbalk.
+  links.forEach(function (a) {
+    a.addEventListener('click', function () {
+      var body = document.getElementById('sectie-body-' + a.dataset.sectie);
+      if (body && !body.classList.contains('show')) {
+        bootstrap.Collapse.getOrCreateInstance(body).show();
+      }
+      markeer(a.dataset.sectie);
+    });
+  });
+
+  if (!('IntersectionObserver' in window)) return;
+  var zichtbaar = new Set();
+  var waarnemer = new IntersectionObserver(function (entries) {
+    entries.forEach(function (e) {
+      if (e.isIntersecting) { zichtbaar.add(e.target.id); }
+      else { zichtbaar.delete(e.target.id); }
+    });
+    // Bovenste zichtbare sectie wint; volgorde in de DOM is de leesvolgorde.
+    for (var i = 0; i < secties.length; i++) {
+      if (zichtbaar.has(secties[i].id)) {
+        markeer(secties[i].id.replace('sectie-', ''));
+        return;
+      }
+    }
+  }, { rootMargin: '-20% 0px -70% 0px' });
+  secties.forEach(function (el) { waarnemer.observe(el); });
+})();
+</script>
 
 {% endblock %}

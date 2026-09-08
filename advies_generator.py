@@ -23,7 +23,8 @@ from helpers import naar_eur
 
 SCRIPT_DIR = Path(__file__).parent
 DATA_DIR   = SCRIPT_DIR / "data"
-DB_PATH    = DATA_DIR / "app.db"
+# Zie app.py: BELEGGEN_DB overschrijft het databasepad (gebruikt door de tests).
+DB_PATH    = Path(os.environ.get("BELEGGEN_DB") or (DATA_DIR / "app.db"))
 PRIJZEN    = DATA_DIR / "prijzen.json"
 
 # Laad omgevingsvariabelen uit .env (o.a. ANTHROPIC_API_KEY) indien aanwezig.

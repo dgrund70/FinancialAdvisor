@@ -260,7 +260,7 @@ def bouw_synthese_prompt(context, gewaagd, gemiddeld, briefing, perspectief, tag
 
 # ── Advies genereren ──────────────────────────────────────────────
 
-def genereer_team(gebruiker_id, tag_id=None):
+def genereer_team(gebruiker_id, tag_id=None, doel=None):
     api_key = os.environ.get("ANTHROPIC_API_KEY")
     if not api_key:
         print("[ERROR] ANTHROPIC_API_KEY niet ingesteld.")
@@ -305,6 +305,13 @@ def genereer_team(gebruiker_id, tag_id=None):
         print("  [WARN] te weinig koershistorie voor kwantitatief risico — sectie overgeslagen")
 
     risicoprofiel = laad_risicoprofiel(gebruiker_id)
+    if doel:
+        # Het doel stuurt het hele team, niet alleen de synthese: een advies voor
+        # 'pensioen over 20 jaar' ziet er anders uit dan voor 'sparen, 2 jaar'.
+        context += (f"\n\n## Doel van de belegger\n{doel}\n"
+                    "Weeg elk advies expliciet tegen dit doel; noem het als een "
+                    "voorstel er niet bij past.")
+        risicoprofiel = f"{risicoprofiel}\n\nGekozen doel voor dit advies: {doel}"
 
     snapshot = json.dumps({
         "posities": [
@@ -379,10 +386,10 @@ def genereer_team(gebruiker_id, tag_id=None):
         cur = conn.execute("""
             INSERT INTO adviezen
               (gebruiker_id, tag_id, gegenereerd, portfolio_snapshot,
-               advies_tekst, model, risico_score, risico_reden, team_details)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+               advies_tekst, model, risico_score, risico_reden, team_details, doel)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (gebruiker_id, tag_id, datetime.now(), snapshot,
-              advies_tekst, MODEL_STERK, risico_score, risico_reden, team_details))
+              advies_tekst, MODEL_STERK, risico_score, risico_reden, team_details, doel))
         advies_id = cur.lastrowid
         for tk, koers, valuta in geldige_tips:
             conn.execute("""
@@ -407,6 +414,8 @@ if __name__ == "__main__":
                         help="Gebruiker-ID waarvoor het advies gegenereerd wordt")
     parser.add_argument("--tag", type=int, default=None,
                         help="Tag-ID voor detailadvies (optioneel; zonder = generiek)")
+    parser.add_argument("--doel", default=None,
+                        help="Waarvoor je belegt (pensioen, sparen, ...); stuurt het hele team")
     args = parser.parse_args()
 
-    genereer_team(args.gebruiker, args.tag)
+    genereer_team(args.gebruiker, args.tag, args.doel)

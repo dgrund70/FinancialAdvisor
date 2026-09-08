@@ -140,10 +140,27 @@ class Advies(db.Model):
     risico_score        = db.Column(db.Integer, nullable=True)   # 1 (defensief) – 5 (offensief)
     risico_reden        = db.Column(db.Text, nullable=True)
     team_details        = db.Column(db.Text, nullable=True)   # JSON: tussenstappen team-advies (None = enkelvoudig advies)
+    doel                = db.Column(db.String(120), nullable=True)  # waarvoor je belegt: pensioen, sparen, ... (team-advies)
     aanbevelingen       = db.relationship(
         "Aanbeveling", backref="advies",
         cascade="all, delete-orphan", lazy=True
     )
+
+
+class TeamVraag(db.Model):
+    """Losse vraag aan het team, met het antwoord.
+
+    Bewust geen Advies: er hoort geen portefeuille-analyse of aanbeveling bij,
+    alleen een antwoord met de portefeuille als context.
+    """
+    __tablename__ = "team_vragen"
+    id            = db.Column(db.Integer, primary_key=True)
+    gebruiker_id  = db.Column(db.Integer, db.ForeignKey("gebruikers.id"), nullable=False)
+    gesteld       = db.Column(db.DateTime, default=datetime.utcnow)
+    vraag         = db.Column(db.Text, nullable=False)
+    antwoord      = db.Column(db.Text, nullable=True)
+    model         = db.Column(db.String(50), nullable=True)
+    context_tekens = db.Column(db.Integer, nullable=True)  # hoeveel context er meeging
 
 
 class Aanbeveling(db.Model):

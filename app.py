@@ -19,7 +19,7 @@ try:
 except ImportError:
     pass
 
-from flask import Flask, flash, redirect, render_template, request, url_for
+from flask import Flask, flash, redirect, render_template, request, session, url_for
 from flask_wtf.csrf import CSRFProtect
 from itsdangerous import BadData, URLSafeTimedSerializer
 from markupsafe import Markup, escape
@@ -31,7 +31,7 @@ from helpers import (naar_eur, xirr, benchmark_eindwaarde,
 from models import (Advies, Aanbeveling, BenchmarkPunt, BENCHMARKS,
                     BrokerAccount, Fundamental, Gebruiker, KoersHistorie,
                     NieuwsArtikel, Positie, Tag, Transactie, TRANSACTIE_TYPES,
-                    Volglijst, db)
+                    TeamVraag, Volglijst, db)
 import advies_parser
 from projectie import (cash_saldi, herbereken_alles, herbereken_positie,
                        na_transactie_wijziging)
@@ -53,7 +53,9 @@ except ImportError:
 
 BASE_DIR = Path(__file__).parent
 PRIJZEN  = BASE_DIR / "data" / "prijzen.json"
-DB_PATH  = BASE_DIR / "data" / "app.db"
+# BELEGGEN_DB overschrijft het pad naar de database. Zo draaien de tests
+# gegarandeerd tegen een tijdelijk bestand en nooit tegen de echte portefeuille.
+DB_PATH  = Path(os.environ.get("BELEGGEN_DB") or (BASE_DIR / "data" / "app.db"))
 
 RISICOVRIJE_RENTE = 0.025   # voor de Sharpe-ratio (EUR-cash/korte rente, jaarbasis)
 
@@ -1710,14 +1712,39 @@ def volglijst_toevoegen(gebruiker_id):
     Gebruiker.query.get_or_404(gebruiker_id)
     ticker  = request.form.get("ticker", "").strip().upper()
     notitie = request.form.get("notitie", "").strip()[:200] or None
+    # bevestigd=1 komt van een suggestieknop: dan is de ticker al gecontroleerd.
+    bevestigd = request.form.get("bevestigd") == "1"
+    session.pop("ticker_suggesties", None)
+
     if not ticker:
         flash("Ticker is verplicht.", "danger")
-    elif Volglijst.query.filter_by(gebruiker_id=gebruiker_id, ticker=ticker).first():
+        return redirect(url_for("advies", gebruiker_id=gebruiker_id))
+    if Volglijst.query.filter_by(gebruiker_id=gebruiker_id, ticker=ticker).first():
         flash(f"{ticker} staat al op je volglijst.", "warning")
-    else:
-        db.session.add(Volglijst(gebruiker_id=gebruiker_id, ticker=ticker, notitie=notitie))
-        db.session.commit()
-        flash(f"{ticker} toegevoegd aan de volglijst.", "success")
+        return redirect(url_for("advies", gebruiker_id=gebruiker_id))
+
+    if not bevestigd:
+        resultaten, gelukt = zoek_tickers(ticker)
+        exact = next((r for r in resultaten if r["symbol"].upper() == ticker), None)
+        if not gelukt:
+            # Netwerkstoring is geen bewijs dat de ticker fout is; niet blokkeren.
+            flash(f"Kon {ticker} nu niet controleren (geen verbinding met de "
+                  "koersenbron). Toegevoegd — controleer 'm zelf.", "warning")
+        elif exact is None and resultaten:
+            session["ticker_suggesties"] = {
+                "invoer": ticker,
+                "notitie": notitie or "",
+                "opties": resultaten[:5],
+            }
+            return redirect(url_for("advies", gebruiker_id=gebruiker_id))
+        elif exact is None:
+            session["ticker_suggesties"] = {
+                "invoer": ticker, "notitie": notitie or "", "opties": []}
+            return redirect(url_for("advies", gebruiker_id=gebruiker_id))
+
+    db.session.add(Volglijst(gebruiker_id=gebruiker_id, ticker=ticker, notitie=notitie))
+    db.session.commit()
+    flash(f"{ticker} toegevoegd aan de volglijst.", "success")
     return redirect(url_for("advies", gebruiker_id=gebruiker_id))
 
 
@@ -1850,24 +1877,27 @@ def _rangschik_tickers(resultaten):
                                    key=lambda p: sleutel(p[0], p[1]))]
 
 
-@app.route("/api/ticker-zoeken")
-def ticker_zoeken():
-    """Zoek tickers via de Yahoo Finance-zoek-API voor de autocomplete."""
+def zoek_tickers(q, aantal=8):
+    """Zoek tickers via de Yahoo Finance-zoek-API.
+
+    Retourneert (resultaten, gelukt). gelukt=False bij een netwerk- of API-fout —
+    dan is 'geen resultaten' geen bewijs dat de ticker niet bestaat.
+    """
     import requests
-    q = request.args.get("q", "").strip()
+    q = (q or "").strip()
     if len(q) < 2:
-        return {"resultaten": []}
+        return [], True
     try:
         r = requests.get(
             "https://query2.finance.yahoo.com/v1/finance/search",
-            params={"q": q, "quotesCount": 8, "newsCount": 0},
+            params={"q": q, "quotesCount": aantal, "newsCount": 0},
             headers={"User-Agent": "Mozilla/5.0"},
             timeout=6,
         )
         r.raise_for_status()
         quotes = r.json().get("quotes", [])
     except Exception:
-        return {"resultaten": []}
+        return [], False
 
     resultaten = []
     for it in quotes:
@@ -1880,7 +1910,14 @@ def ticker_zoeken():
             "beurs":  it.get("exchDisp") or "",
             "type":   it.get("quoteType") or "",
         })
-    return {"resultaten": _rangschik_tickers(resultaten)}
+    return _rangschik_tickers(resultaten), True
+
+
+@app.route("/api/ticker-zoeken")
+def ticker_zoeken():
+    """Zoek tickers via de Yahoo Finance-zoek-API voor de autocomplete."""
+    resultaten, _ = zoek_tickers(request.args.get("q", ""))
+    return {"resultaten": resultaten}
 
 
 # ── Adviesmodule ──────────────────────────────────────────────────
@@ -2049,6 +2086,9 @@ def advies(gebruiker_id):
         ticker_nieuws  = ticker_nieuws,
         volglijst      = volglijst,
         volglijst_tickers = volglijst_tickers,
+        ticker_suggesties = session.pop("ticker_suggesties", None),
+        team_vragen    = (TeamVraag.query.filter_by(gebruiker_id=gebruiker_id)
+                          .order_by(TeamVraag.gesteld.desc()).limit(10).all()),
         koop_account   = koop_account,
         heeft_api_key  = bool(os.environ.get("ANTHROPIC_API_KEY")),
     )
@@ -2085,14 +2125,56 @@ def advies_team_genereer(gebruiker_id):
     tag_id = request.form.get("tag_id", type=int)  # None = generiek
     if tag_id and not Tag.query.filter_by(id=tag_id, gebruiker_id=gebruiker_id).first():
         return {"taak_id": None, "fout": "Ongeldige tag."}, 400
+    doel = request.form.get("doel", "").strip()[:120] or None
+    toelichting = request.form.get("doel_toelichting", "").strip()[:200]
+    if doel and toelichting:
+        doel = f"{doel} — {toelichting}"
+    elif toelichting and not doel:
+        doel = toelichting
     cmd = [sys.executable, str(BASE_DIR / "advies_team.py"),
            "--gebruiker", str(gebruiker_id)]
     if tag_id:
         cmd += ["--tag", str(tag_id)]
+    if doel:
+        cmd += ["--doel", doel]
     taak_id, al_bezig = _start_taak(
         f"advies-team-{gebruiker_id}-{tag_id or 'generiek'}",
         cmd, timeout=240, klaar_bericht="Team-advies gegenereerd.")
     return {"taak_id": taak_id, "al_bezig": al_bezig}
+
+
+@app.route("/gebruiker/<int:gebruiker_id>/advies/vraag", methods=["POST"])
+def advies_vraag_stellen(gebruiker_id):
+    """Eén vraag aan het team: één API-call met een compacte portefeuillecontext.
+
+    Geen volledige analyse en geen aanbevelingen — zie advies_vraag.py.
+    """
+    Gebruiker.query.get_or_404(gebruiker_id)
+    if not os.environ.get("ANTHROPIC_API_KEY"):
+        return {"taak_id": None,
+                "fout": "Stel eerst ANTHROPIC_API_KEY in als omgevingsvariabele."}, 400
+    vraag = request.form.get("vraag", "").strip()[:1000]
+    if len(vraag) < 5:
+        return {"taak_id": None, "fout": "Stel een vraag van minstens een paar woorden."}, 400
+    cmd = [sys.executable, str(BASE_DIR / "advies_vraag.py"),
+           "--gebruiker", str(gebruiker_id), "--vraag", vraag]
+    taak_id, al_bezig = _start_taak(
+        f"advies-vraag-{gebruiker_id}", cmd, timeout=120,
+        klaar_bericht="Het team heeft je vraag beantwoord.")
+    return {"taak_id": taak_id, "al_bezig": al_bezig}
+
+
+@app.route("/gebruiker/<int:gebruiker_id>/advies/vraag/<int:vraag_id>/verwijderen",
+           methods=["POST"])
+def advies_vraag_verwijderen(gebruiker_id, vraag_id):
+    item = TeamVraag.query.get_or_404(vraag_id)
+    if item.gebruiker_id != gebruiker_id:
+        flash("Niet geautoriseerd.", "danger")
+        return redirect(url_for("advies", gebruiker_id=gebruiker_id))
+    db.session.delete(item)
+    db.session.commit()
+    flash("Vraag verwijderd.", "info")
+    return redirect(url_for("advies", gebruiker_id=gebruiker_id))
 
 
 @app.route("/gebruiker/<int:gebruiker_id>/risicoprofiel/bijwerken", methods=["POST"])
